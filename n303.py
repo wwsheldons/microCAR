@@ -61,15 +61,13 @@ class MicropyGPS(object):
 
         #####################
         # Data From Sentences
-        # Time
-        self.timestamp = (0, 0, 0)
-        self.date = (0, 0, 0)
         self.local_offset = local_offset
 
         # Position/Motion
+        self.speed_kmh = 0
         self.latitude = ''
         self.longitude = ''
-        self.speed = 0
+        
         self.course = ''
         self.altitude = ''
         self.geoid_height = ''
@@ -349,9 +347,9 @@ class MicropyGPS(object):
             self.longitude = (lon_degs, lon_mins, lon_hemi)
             '''
             # Include mph and hm/h
-            #self.speed = (spd_knt, spd_knt * 1.151, spd_knt * 1.852)
-            self.speed = spd_knt * 1.852
-            self.gnss_buf[42:45] = ('{:>03}'.format(int(self.speed))).encode()
+            #self.speed_kmh = (spd_knt, spd_knt * 1.151, spd_knt * 1.852)
+            self.speed_kmh = spd_knt * 1.852
+            self.gnss_buf[42:45] = ('{:>03}'.format(int(self.speed_kmh))).encode()
 
             self.course = course
             self.gnss_buf[45:51] = ('%06.2f'%course).encode()
@@ -367,7 +365,7 @@ class MicropyGPS(object):
             '''
             self.latitude = (0, 0.0, 'N')
             self.longitude = (0, 0.0, 'W')
-            self.speed = 0
+            self.speed_kmh = 0
             self.course = 0.0
             self.date = (0, 0, 0)
             '''
@@ -443,8 +441,8 @@ class MicropyGPS(object):
             return False
 
         # Include mph and km/h
-        self.speed = spd_knt * 1.852
-        #self.speed = (spd_knt, spd_knt * 1.151, spd_knt * 1.852)
+        self.speed_kmh = spd_knt * 1.852
+        #self.speed_kmh = (spd_knt, spd_knt * 1.151, spd_knt * 1.852)
         self.course = course
         return True
 
@@ -710,7 +708,7 @@ class MicropyGPS(object):
     # supported_sentences_ = {'GNRMC': gnrmc, 'GNGGA': gngga, 'GNVTG': gnvtg, 'GNGSA': gngsa, 'GNGSV': gngsv,'GNGLL': gngll}
     @property
     def speed(self):
-        return self.speed
+        return self.speed_kmh
 
 
 def test():
@@ -725,6 +723,6 @@ def test():
             for y in sentence:
                 buf = my_gps.update(chr(y))
                 if buf:
-                    print(buf)
-                else:
                     print(my_gps.gnss_buf)
+
+#test()

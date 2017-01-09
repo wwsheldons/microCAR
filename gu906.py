@@ -134,7 +134,7 @@ class MicropyGPRS(object):
     FRAME_LEN = {'9000':23,'9010':15,'9007':21,'9008':12,'9009':12,'9004':13+59,'9005':11,
                  '9006':11,'9002':11,'9003':11,'9005':11,'9006':11,'9011':12,'9012':11}
     
-    def __init__(self, local_offset=0):
+    def __init__(self, ip='101.201.105.176', port=8080, _id=b'AP9904N0769', pwd='123456', local_offset=0):
         '''
         Setup GPS Object Status Flags, Internal Data Registers, etc
         '''
@@ -153,14 +153,25 @@ class MicropyGPRS(object):
         #####################
         # buf
         self.tx_buf = b''
-        self.id = b'AP9904N0769'
         self.active_order = 0
         self.order_from_server = []
         self.rx_dat = []
         self.rx_sms = []
         self.admin_phone = '13592683720'
+        self.set_phone = ['','']
         self.tmp_record_flag = True
         self.tmp_record = b''
+        # sms order
+        self.pwd = pwd
+        self.opreat_lock = ''
+        self.ip = ip
+        self.port = port
+        self.id = _id
+        #self.id = b'AP9904N0769'
+        self.lock_power_on = False
+        self.storage_phone = False
+        self.storage_ip_id_port = False
+        self.storage_pwd = False
         
     ########################################
     # opreate the gprs module
@@ -188,7 +199,19 @@ class MicropyGPRS(object):
         if d == 0x1a:
             return self.gprs_port.writechar(0x1a)
         return 0
-
+    def send_dats(self,d):
+        if order != 0:
+        # self.debug_print('the order will be send is {}'.format(hex(order)[2:]))
+        # self.debug_print('the dat will be send is{}'.format(d))
+        '''
+        if GL.m == 0:
+            conect_()
+        '''
+        order = 'AT+CIPSEND={},1'.format(len(d))
+        send_at(order)
+        #send_at('AT+CIPSEND={}'.format(len(d)))#bin type
+        if ats_dict[order]:
+            return send_d(d)
     ## sms correlation 
     def rec_sms(self,num=1):
         return self.send_at('AT+CMGR={}'.format(num)) # the {num}th sms
@@ -209,10 +232,108 @@ class MicropyGPRS(object):
         return self.send_at('AT+CNUM=?')
     def check_csq(self):
         return self.send_at('AT+CSQ')
+    #def conect_(ip = "101.201.105.176",port = 5050,apn='',usr = '',passwd=''):
+    def connect(self,ip,port):
+        '''
+        if apn != '' :
+            send_at('AT+CSTT={},{},{}'.format(apn,usr,passwd))
+            return GL.m
+        '''
+        send_at('AT+CSTT="CMNET","",""')
+        if ats_dict['AT+CSTT="CMNET","",""']:
+            send_at('AT+CGATT=1')
+            if ats_dict['AT+CGATT=1']:
+                return send_at('AT+CIPSTART="TCP","{}",{}'.format(ip,port))
     ########################################
     # data from server Parsers
     ########################################
-    
+    def unpack_sms(self,num,context,opt = 0x01):
+        # self.debug_print('num is {} and context is {}'.format(num,context))
+        if 'password' in context:
+            ind_password = context.index('password:')
+            self.pwd = context[ind_password+9:ind_password+14]
+            self.storage_pwd = True
+            #storage_gprs['m_pwd'](sms_password)
+        if 'ip' in context and 'id' in context and 'port' in context:
+            self.storage_ip_id_port = True
+            ind_ip = context.index('ip:')
+            ind_ip_end = context[ind_ip+1:].index('#')
+            self.ip = context[ind_ip+3:ind_ip_end+ind_ip+1]
+            #storage_gprs['m_ip'](ip)
+            ind_port = context.index('port:')
+            self.port = context[ind_port+5:ind_port+9]
+            #storage_gprs['m_port'](port)
+            ind_id = context.index('id:')
+            self.id = context[ind_id+3:ind_id+14]
+            #storage_gprs['m_id'](id)
+            #self.send_sms(num,dat='ip port and id set OK')
+            #storage_gprs['m_using_times']()
+            #recv_set_sms = 1
+        if 'admin phone' in context:
+            ind = context.index(':')
+            ph1 = context[ind+1:ind+12]
+            self.storage_phone = True
+            if ',' in context:
+                ind2 = context.index(',')
+                ph2 = context[ind2+1:ind2+12]
+                self.set_phone[1] = ph1
+                self.set_phone[2] = ph2
+
+                #storage_gprs['m_ap'](ph1+ph2)
+            else:
+                self.set_phone[1] = ph1
+                #storage_gprs['m_ap'](ph1)
+            #send_sms(num,dat='admin phone set OK')
+            return 1
+        if 'ic' in context:
+            ind = context.index('ic:')
+            order = context[ind+3:]
+            if num in self.admin_phone:
+                self.opreat_lock = order
+            #return sms_operate_lock(order,num)
+        if 'power' in context:
+            ind = context.index('power')+6
+            order = context[ind:]
+            if order == 'restart':
+                self.send_sms(num,'the board will be restart after 2 seconds')
+                try:
+                    pyb.delay(2000)
+                except NameError:
+                    time.sleep(2)
+                
+                pyb.hard_reset()
+        if 'lock' in context:
+            ind = context.index('lock:')+5
+            order = context[ind:]
+            if order == 'on':
+                self.lock_power_on = True
+                '''
+                GL.lock_status = [1]*12
+                storage_gprs['m_ls'](0)
+                lock_gprs['lp_ons']()
+                send_sms(num,dat='locks have power on')
+                '''
+                return 1
+
+    def pack_server_data(order,dat,opt = 0x01):
+        if not isinstance(dat,bytes):
+            dat = bytes(dat)
+        tmp_key_index = ('{:0>2}'.format(os.urandom(1)[0]%99)).encode()
+        tmp_order = hex(order)[2:].encode() # 4 bytes
+        tmp_data = tmp_order + dat
+        if opt & 0x01:
+            data = bytes(encrypt(tmp_data, get_key(int(str(tmp_key_index,'utf-8')))))
+        else:
+            data = tmp_data
+        #len_dat = ('%04d'%(len(data))).encode()  # 4 bytes
+        len_dat = ('{:0>4}'.format(len(data))).encode()
+        tx_buf = len_dat+tmp_key_index+data
+        crc_ = crc32(tx_buf)
+        tx_buf = tx_buf + crc_
+        tx_buf = transferred_meaning(tx_buf)
+        self.tx_buf = b'~'+ tx_buf + b'~'
+        
+        #return self.tx_buf
     def unpack_server_data(self,dat,opt = 0x01):
         '''
         opt = 0bxxxx xxxx
@@ -350,7 +471,7 @@ class MicropyGPRS(object):
             return False
         try:
             phone_num = self.gprs_segments[1].split(b',')[1][1:-1].decode()
-            if phone_num[3:] == self.admin_phone:
+            if phone_num[3:] == self.admin_phone[0]:
                 self.rx_sms.append(self.gprs_segments[2].decode())
             #print('phone_num is {}'.format(phone_num))
             print('self.rx_sms is {}'.format(self.rx_sms))
