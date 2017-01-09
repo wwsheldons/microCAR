@@ -20,7 +20,7 @@ class MicropyGPRS(object):
     Include AT order , SMS and data from server.
     Parses sentences one character at a time using update(). """
 
-    # Max Number of Characters a valid sentence can be (based on GGA sentence)
+    # Max Number of Characters a valid sentence can be (based on module limited)
     SENTENCE_LIMIT = 1000
     #__HEMISPHERES.keys() = ('N', 'S', 'E', 'W')
     __HEMISPHERES = {'N':b'1', 'S':b'2', 'E':b'1', 'W':b'2'}
@@ -39,14 +39,10 @@ class MicropyGPRS(object):
         self.sentence_data_active = False
         self.sentence_at_active = False
         self.active_segment = 0
-        self.process_crc = False
         self.gprs_segments = ['']
-        self.crc_xor = 0
         self.char_count = 0
         self.fix_time = 0
 
-        self.just_send_ats = ''
-        self.just_send_dats = ''
         self.ats_dict = {}
         #####################
         # buf
@@ -132,27 +128,32 @@ class MicropyGPRS(object):
                         reply: b'AT+IPR=115200\r\n\r\nOK\r\n'
         'AT+FTPSERV=addr','AT+FTPGETNAME=filename',''AT+FTPUN=usr','AT+FTPPW=pwd','AT+FTPGET=1'(FTP order)
         """
-        if self.char_count <= 1:
-            return False
         try:
             at_order = self.gprs_segments[0]
+
+            order_reply_len = [3 if 'CSQ' in at_order else 2][0]
+            if len(self.gprs_segments) != order_reply_len:
+                return False
+
             module_reply = self.gprs_segments[-1]
             # Skip timestamp if receiver doesn't have on yet
-            if 'OK' == module_reply:
+            if 'OK' == module_reply or '>' == module_reply:
                 self.ats_dict[at_order] = 1
             if 'CSQ' in at_order:
                 dat = self.gprs_segments[1]
-                ind = dat.index(',')
-            
+                try:
+                    ind = dat.index(',')
+                    self.rssi = int(self.gprs_segments[1][ind-2:ind])
+                except ValueError:
+                    return False
         except ValueError:
             return False
-
-
-
+        
+        '''
         # If Fix is GOOD, update fix timestamp
         if fix_stat:
             self.new_fix_time()
-        self.update_gngga = True
+        '''
         return True
 
     def sms(self):
@@ -300,7 +301,7 @@ class MicropyGPRS(object):
         
         self.char_count += 1
         self.gprs_segments[self.active_segment] += new_char
-        print('gprs_segments is {}'.format(self.gprs_segments))
+        #print('gprs_segments is {}'.format(self.gprs_segments))
 
         # Check if a new string is starting ('AT')
         if new_char == 'T' and self.gprs_segments[self.active_segment][-2] == 'A':
@@ -312,16 +313,19 @@ class MicropyGPRS(object):
             if 10<= ascii_char <126:
                 #print('new_char is {}'.format(new_char))
                 # Check if sentence is ending ('\r\n' over three times or '>'(AT+CIPSEND=109,1))
-                #print('self.gprs_segments[self.active_segment][-1]={}'.format(self.gprs_segments[self.active_segment][-1]))
-
+                
+                if 'CSQ' in self.gprs_segments[0] and self.active_segment > 5:
+                    return None
+                if 'CSQ' not in self.gprs_segments[0] and self.active_segment > 3:
+                    return None
                 if (new_char == '\n') and (self.gprs_segments[self.active_segment][-2] == '\r'):
                     #self.process_crc = False
                     self.gprs_segments[self.active_segment] = self.gprs_segments[self.active_segment][:-2]
                     self.active_segment += 1
                     self.gprs_segments.append('')
-                    if ('OK' or 'ERROR') in self.gprs_segments[self.active_segment-1] or self.active_segment > 4:
+                    if 'ERROR' in self.gprs_segments[self.active_segment-1] or 'OK' in self.gprs_segments[self.active_segment-1]:
                         valid_at_sentence = True
-                    
+                    #print('0 self.gprs_segments is {}'.format(self.gprs_segments))
                 if new_char == '>':
                     valid_at_sentence = True
 
@@ -331,8 +335,8 @@ class MicropyGPRS(object):
                     #self.clean_sentences += 1  # Increment clean sentences received
                     self.sentence_at_active = False  # Clear Active Processing Flag
                     #self.parsed_sentences += 1
-                    print('self.gprs_segments is {}'.format(self.gprs_segments))
-                    #return self.at()
+                    #print('self.gprs_segments is {}'.format(self.gprs_segments))
+                    return self.at()
 
                 # Check that the sentence buffer isn't filling up with Garage waiting for the sentence to complete
                 if self.char_count > self.SENTENCE_LIMIT:
@@ -370,10 +374,27 @@ class MicropyGPRS(object):
             self.fix_time = pyb.millis()
         except NameError:
             self.fix_time = time.time()
-
-    # All the currently supported NMEA sentences
-    #supported_sentences = {'GNRMC': gnrmc, 'GNGGA': gngga,'GPRMC':gnrmc, 'GPGGA':gngga}
-    # supported_sentences_ = {'GNRMC': gnrmc, 'GNGGA': gngga, 'GNVTG': gnvtg, 'GNGSA': gngsa, 'GNGSV': gngsv,'GNGLL': gngll}
+    def time_since_fix(self):
+        """Returns number of millisecond since the last sentence with a valid fix was parsed. Returns 0 if
+        no fix has been found"""
+        # Test if a Fix has been found
+        if self.fix_time == 0:
+            return -1
+        # Try calculating fix time assuming using millis on a pyboard; default to seconds if not
+        try:
+            current = pyb.elapsed_millis(self.fix_time)
+        except NameError:
+            current = time.time() - self.fix_time
+        return current
+    # All the currently supported at sentences
+    '''
+    supported_at_order = {'AT':at, 'ATZ':atz, 'AT+CMGF=1':cmgf, 'AT+CNUM=?':cnum, 'AT+CSQ':csq, 
+                          'AT+CIPCLOSE=0':cipclose,'AT+CMGR=1':cmgr, 'AT+CMGD=1,4':cmgd, 'AT+CMGS':cmgs,
+                          'AT+CSTT="CMNET","",""':cstt, 'AT+CGATT=1':cgatt, 'AT+CIPSTART':cipstart,
+                          'AT+CIPSEND':cipsend, 'AT+ENBR':enbr,'AT+IPR':ipr, 'AT+FTPSERV': ftpserv,
+                          'AT+FTPGETNAME':ftpgetname, 'AT+FTPUN':ftpun,
+                          'AT+FTPPW':ftppw, 'AT+FTPGET=1':ftpget}
+    '''
     @property
     def csq(self):
         return self.rssi
@@ -395,14 +416,5 @@ def test():
         for y in sentence:
             buf = my_gps.update(chr(y))
             if buf:
-                print(buf)
-            else:
-                print(my_gps.gnss_buf)
-
-aa = b'AT+CMGF=1\r\n\r\nOK\r\n'
-my_gprs = MicropyGPRS()
-my_gprs.tx_buf = aa.decode()
-for y in aa:
-    buf = my_gprs.update(chr(y))
-    if buf:
-        print(my_gprs.gprs_segments[0])
+                print(my_gprs.gprs_segments[0])
+    
