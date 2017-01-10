@@ -4,35 +4,43 @@ from usched import Sched,wait,Poller
 
 from gu906 import MicropyGPRS
 from n303 import MicropyGPS
+from m3650b import MicropyRFID
 
 
 
-
-
+def handle_rfid_thread(r):
+    while True:
+        if r.ic_id:
+            if r.ic_id in 
 
 def handle_gprs_thread(m):
     while True:
         if m.order_from_server:
             for i,order in enumerate(m.order_from_server):
                 if order in server_orders:
-                    handle(i)
+                    print('handle({})'.format(order))
                 del m.order_from_server[i]
+        
 
         if m.opreat_lock:
             if 'open' in m.opreat_lock:
-                lock('opens')
+                print('lock({}s)'.format('open'))
             if 'close' in m.opreat_lock:
-                lock('closes')
+                print('lock({}s)'.format('close'))
             m.opreat_lock = ''
-        if m.lock_power_on:
-            lock('powers_on')
-            storage['modify_ls'](0)
-            m.send_sms(num,dat='locks have power on')
-            m.lock_power_on = False
-        if m.storage_phone:
-            storage('')
-            m.storage_phone = False
+        
 
+        if m.lock_power_on:
+            print('lock({})'.format('powers_on'))
+            print('storage({})'.format('modify_ls'))
+            #m.send_sms(num,dat='locks have power on')
+            m.lock_power_on = False
+        
+
+        if m.storage_phone:
+            print('storage({})'.format('set_phone'))
+            m.storage_phone = False
+        yield
 
 
 
