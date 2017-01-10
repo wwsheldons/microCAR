@@ -121,7 +121,7 @@ class MicropyGPRS(object):
 
         #####################
         # hardware init
-        self.gprs_init()
+        #self.gprs_init()
 
     def gprs_init(self):
         self.hw_port.init(115200, read_buf_len=512)
@@ -673,6 +673,11 @@ class MicropyGPRS(object):
 
 
     # All the currently supported at sentences
+    supported_order = {'9000':(23,),'9010':(15,),'9007':(21,),
+                       '9008':(12,),'9009':(12,),'9004':(72,),
+                       '9005':(11,),'9006':(11,),'9002':(11,),
+                       '9003':(11,),'9005':(11,),'9006':(11,),
+                       '9011':(12,),'9012':(11,)}
     '''
     supported_at_order = {'AT':at, 'ATZ':atz, 'AT+CMGF=1':cmgf, 'AT+CNUM=?':cnum, 'AT+CSQ':csq, 
                           'AT+CIPCLOSE=0':cipclose,'AT+CMGR=1':cmgr, 'AT+CMGD=1,4':cmgd, 'AT+CMGS':cmgs,
@@ -680,13 +685,13 @@ class MicropyGPRS(object):
                           'AT+CIPSEND':cipsend, 'AT+ENBR':enbr,'AT+IPR':ipr, 'AT+FTPSERV': ftpserv,
                           'AT+FTPGETNAME':ftpgetname, 'AT+FTPUN':ftpun,
                           'AT+FTPPW':ftppw, 'AT+FTPGET=1':ftpget}
-    '''
+    
     supported_order = {'9000':(23,handle_9000),'9010':(15,handle_9010),'9007':(21,handle_9007),
                        '9008':(12,handle_9008),'9009':(12,handle_9009),'9004':(72,handle_9004),
                        '9005':(11,handle_9005),'9006':(11,handle_9006),'9002':(11,handle_9002),
                        '9003':(11,handle_9003),'9005':(11,handle_9005),'9006':(11,handle_9006),
                        '9011':(12,handle_9011),'9012':(11,handle_9012)}
-    
+    '''
 
     @property
     def csq(self):
@@ -706,8 +711,8 @@ def test():
                 b'AT+CMGR=1\r\n\r\n+CMS ERROR: 321\r\n',
                 b'AT+CSQ\r\n\r\n+CSQ: 31, 99\r\n\r\nOK\r\n',
                 b'AT+CIPSEND=108,1\r\n\r\n>']
-
-    my_gprs = MicropyGPRS()
+    a=b=1
+    my_gprs = MicropyGPRS(a,b)
     my_gprs.tx_buf = b'AP9904N0769!\x00\x00\x00\x00\x00\x00!\x00\x00\x00\x00117-01-0309:53:5813447.7089111335.64990123000122.09161111*****'
     for sentence in test_sentence:
         print('sentence is {}'.format(sentence))
