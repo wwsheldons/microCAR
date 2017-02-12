@@ -1,14 +1,7 @@
 import pyb
 import os
 import struct
-#from gu906 import send_1003
-from time import sleep
-from utime import ticks_diff,ticks_ms
-import GL
-from beep import alarm
-#from storage import modify_ls
-from lcd12864 import lcd_lock
-from frame import frame_lock
+
 
 
 
@@ -19,397 +12,349 @@ lock_key1 = b')#\xbe\x84\xe1l\xd6\xaeR\x90I\xf1\xf1\xbb\xe9\xeb\xb3\xa6\xdb<\x87
 lock_key2 = b"\xfa\x16\xbb\x11\xad\xae$\x88y\xfeR\xdb%C\xe5<\xf4E\xd3\xd8(\xce\x0b\xf5\xc5`Y=\x97'\x8aYv-\xd0\xc2\xc9\xcdh\xd4Ijy%\x08a@\x14\xb1;j\xa5\x11(\xc1\x8c\xd6\xa9\x0b\x87\x97\x8c/\xf1\x15\x1d\x9a\x95\xc1\x9b\xe1\xc0~\xe9\xa8\x9a\xa7\x86\xc2\xb5T\xbf\x9a\xe7\xd9#\xd1U\x908(\xd1\xd9l\xa1f^N\xe10\x9c\xfe\xd9q\x9f\xe2\xa5\xe2\x0c\x9b\xb4Ge8*F\x89\xa9\x82yzvx\xc2c\xb1&\xdf\xda)m>b\xe0\x96\x124\xbf9\xa6?\x89^\xf1m\x0e\xe3l(\xa1\x1e \x1d\xcb\xc2\x03?A\x07\x84\x0f\x14\x05e\x1b(a\xc9\xc5\xe7,\x8eF6\x08\xdc\xf3\xa8\x8d\xfe\xbe\xf2\xebq\xff\xa0\xd0;u\x06\x8c~\x87xsM\xd0\xbe\x82\xbe\xdb\xc2FA+\x8c\xfa0\x7fp\xf0\xa7T\x862\x95\xaa[h\x13\x0b\xe6\xfc\xf5\xca\xbe}\x9f\x89\x8aA\x1b\xfd\xb8Oh\xf6r{\x14\x99\xcd\xd3\r\xf0D:\xb4\xa6fS3\x0b\xcb\xa1\x10"
 
 
-lock_inquire_order    = 0x10
-lock_operate_order    = 0x11
-lock_order_list = bytes([lock_inquire_order,lock_operate_order])
-lock_reply_status     = 0x90
-lock_operate_confirm  = 0x91
-
-can_timeout_ms = 200
-
-
-#GL.lock_timeout = [0]*GL.N_lock
-sta = {'open':1,'close':2,'unnormal':3,'cover_open':4}
-#lock_status = [int(hex(i<<4),16) + j for i,j in zip(GL.ws,GL.ls)]
-p1 =  pyb.Pin(pyb.Pin.cpu.C0, pyb.Pin.OUT_PP)
-p2 =  pyb.Pin(pyb.Pin.cpu.C1, pyb.Pin.OUT_PP)
-p3 =  pyb.Pin(pyb.Pin.cpu.C2, pyb.Pin.OUT_PP)
-p5 =  pyb.Pin(pyb.Pin.cpu.C3, pyb.Pin.OUT_PP)
-p6 =  pyb.Pin(pyb.Pin.cpu.A4, pyb.Pin.OUT_PP)
-p7 =  pyb.Pin(pyb.Pin.cpu.B9, pyb.Pin.OUT_PP)
-#p_dict = {1:p1,2:p2,3:p3,4:p4,5:p5,6:p6,7:p7,8:p8}
-p_dict = {1:p1,2:p2,3:p3,5:p5,6:p6,7:p7}
-ch_dict = {1:50,0:49}
-fifo = 0
-
-
-def tick2(timer):
-    lcd_lock['c_a']()
-    timer.deinit()
-
-
-def start_ns_delay(n=60*3):
-    lcd_lock['s_a']()
-    #n_us < 1073741823
-    #n_us =    1000000*n
-    tim2 = pyb.Timer(2)
-    tim2.init(prescaler=84, period=1000000*n)
-    tim2.callback(tick2)
 
 
 
-def check_channel(n):
-    if n in p_dict:
-        return 1
-    else:
-        debug_print('there is no this power channel')
-        return 0
-def lock_power(n,opt):
-    '''n---channel(1-8)
-       opt-on(1) or off(0)
-    '''
-    p_dict[n](opt)
-    return 1
-def lock_power_on(n=1):
-    if check_channel(n):
-        return p_dict[n](0)
-def lock_power_off(n=1):
-    if check_channel(n):
-        return p_dict[n](1)
-def lock_power_status(n):
-    if check_channel(n):
-        return bytes([ch_dict[p_dict[n].value()]])
-def oprate_locks_power(opt):
-    opt_dict = {1:lock_power_on,0:lock_power_off}
-    for i in p_dict.keys():
-        opt_dict[opt](i)
-    return 1
-def locks_power_on():
-    lose_lock_init()
-    GL.lock_status = [1]*12
-    oprate_locks_power(1)
-    return check_locks()
-     
-def locks_power_off():
-    return oprate_locks_power(0)
-def locks_power_status():
-    out = bytearray()
-    for i in p_dict.keys():
-        out.extend(lock_power_status(i))
-    return out
-    
-def lose_lock_init():
-    #update_lock_status()
-    for i in range(GL.N_lock):
-        GL.lose_lock[i] = [5 if GL.lock_status[i] else 0][0]
-def update_lock_status():
-    for i in range(GL.N_lock):
-        if GL.ws[i] == 0:
-            GL.ls[i] = 0
-    GL.lock_status = [int(hex(i<<4),16) + j for i,j in zip(GL.ws,GL.ls)]
-def can_init():
-    can = pyb.CAN(2)
-    can.init(pyb.CAN.NORMAL, extframe=False, prescaler=8,  sjw=1, bs1=12, bs2=8)#250K
-    can.setfilter(fifo, pyb.CAN.LIST16,0,(1, 2, 4,0))
-    GL.can = can
 
+POWER_LIST = (pyb.Pin.cpu.C0,pyb.Pin.cpu.C1,pyb.Pin.cpu.C2,pyb.Pin.cpu.C3,pyb.Pin.cpu.A4,pyb.Pin.cpu.B9)
 
-
-def _encrypt_add(dat,key_index):
-    tmp = [0]*len(dat)
-    for i in range(len(dat)):
-        tmp[i] = dat[i]^lock_key1[key_index]^lock_key2[key_index]
-    return tmp
+#################################
+####  functions
 def encrypt_add(dat,key_index):
     if isinstance(key_index,bytes):
         key_index = key_index[0]
     return bytes([i^lock_key1[key_index]^lock_key2[key_index] for i in dat])
     
-def _crc_add(dat):
-    jj = sum(dat)
-    s0 = (jj>>8)&0xff
-    s1 = (jj>>0)&0xff
-    return [s0,s1]
 def crc_add(dat):
-    jj = sum(dat)
-    return struct.pack(">H",jj) # low 2 bytes
-def pack_lock_data(dat_type,dat,lock_id,opt = 0x01):
-    if isinstance(dat_type,int):
-        dat_type = (dat_type).to_bytes(1,'little')
-    if isinstance(lock_id,bytes):
-        lock_id = lock_id[0]
-    key_index = os.urandom(1)[0]
-    if 0 <= lock_id <= 15:
-        length_dat = len(dat)+1
-        if length_dat > 255:
-            GL.debug_print('data is too long, Please make it less than 255')
-            return None
-        if dat_type not in lock_order_list:
-            GL.debug_print('dat_type is not in the list')
-            return None
-        data = dat_type + dat
-        if (opt & 0x01):
-            data = encrypt_add(data, key_index)
-        tmp_head = (lock_id).to_bytes(1,'little')+(length_dat).to_bytes(1,'little') + (key_index).to_bytes(1,'little')
-        crc_ = crc_add( tmp_head + data)
-        tx_buf = tmp_head + data + crc_
-        tx_buf = frame_lock['mean'](tx_buf)
-        lock_tx_buf = b'~' + tx_buf+ b'~'
-        return lock_tx_buf
-    else:
-        GL.debug_print('The lock id is not in the list')
-def split_by_n(dat,n=8):
-    if isinstance(dat,bytes):
-        dat = [i for i in dat]
-    out_n = len(dat[::n])
-    out = [bytearray(n)]*out_n
-    for i in range(out_n):
+    return struct.pack(">H",sum(dat)) # low 2 bytes
+
+
+
+
+class MicropyLOCK(object):
+    FIFO = 0
+    STA = {'open':1,'close':2,'unnormal':3,'cover_open':4}
+
+    order_list = bytes([0x10,0x11])
+    reply_status     = 0x90
+    operate_confirm  = 0x91
+    can_timeout_ms = 200
+    def __init__(self, can_port, pinlist):
+
+        ##############
+        # hardware port
+        self.p = [pyb.Pin(pin_name, pyb.Pin.OUT_PP) for pin_name in pinlist]
+        self.can = can_port
+
+        ##############
+        # status
+        self.N_lock = 12 # num of locks
+        self.ws = [0]*self.N_lock # banshou status
+        self.ls = [0]*self.N_lock # lock status
+        self.lock_status=[1]*self.N_lock
+        self.lose_lock = [10]*self.N_lock
+
+        ##############
+        # dat
+        self.rx_dat = []
+        self.tx_dat = []
+        self.rx_dat = 0
+        self.random_num = []
+        self.current_lock_id = 0
+
+        ##############
+        # flag used in other program
+        self.lcd_on = False
+        self.update_lcd_ls = False
+
+        ###############
+        self.check_locks()
+
+
+    def lock_power_opreate(self,n,mode):
+        '''n---channel(1-8)
+           mode-on(1) or off(0)
+        '''
         try:
-            out[i] = bytearray(dat[i*n:i*n+n])
+            self.p[n].value(not mode)
+            return 1
         except:
-            out[i] = bytearray(dat[i*n:])
-    #tx_dat = out
-    return out
-def opreate_lock_frame(lock_id,random_num,order):
-    '''order 0-check lock   1-open lock   2-close lock'''
-    if order == 0:
-        tmp1 = os.urandom(6)
-        comm = (lock_inquire_order).to_bytes(1,'little')
-    elif order in [1,2]:
-        tmp1 = (order).to_bytes(1,'little')+ bytes(random_num)
-        comm = (lock_operate_order).to_bytes(1,'little')
-    else:
-        GL.debug_print('order is wrong')
-        return None
-    tmp2 = crc_add(comm + tmp1)
-    dat = tmp1 + tmp2
-    tmp = pack_lock_data(comm,dat,lock_id)
-    return split_by_n(tmp)
-def check_lock_frame(lock_id,random_num):
-    return opreate_lock_frame(lock_id,random_num,0)
-def open_lock_frame(lock_id,random_num):
-    return opreate_lock_frame(lock_id,random_num,1)
-def close_lock_frame(lock_id,random_num):
-    return opreate_lock_frame(lock_id,random_num,2)
-
-
-
-
-
-def send_lock_dat(dat):
-    host_can_id = 0x7ff
-    GL.debug_print('the data will be sent soon is for {}th lock'.format(dat[0][1]))
-    for i in range(len(dat)):
+            print('there is no {}th channel'.format(n))
+            return None
+    def lock_power_on(self,n=1):
+        return self.lock_power_opreate(n,1)
+    def lock_power_off(self,n=1):
+        return self.lock_power_opreate(n,0)
+    def lock_power_status(self,n=1):
         try:
-            GL.can.send(dat[i], host_can_id)
+            return self.p[n].value()
         except:
-            continue
-    #GL.lock_timeout[dat[0][1]] = ticks_ms()
-    GL.lose_lock[dat[0][1]] -= 1
-    
-    return 1
-def rec_lock_dat(timeover=0):
-    flag = 0
-    rx_buf = []
-    if timeover == 0 :
-        time_tmp = can_timeout_ms
-    else:
-        time_tmp = timeover
-    while True:
-        tmp = GL.can.recv(fifo,timeout=time_tmp)
-        #GL.debug_print('recv1 can data is ()'format(tmp))
-        if tmp[3][0] == 126 and flag == 0:
-            rx_buf.extend([tmp])
-            flag = 1
-            continue
-        if tmp[3][-1] == 126 and flag == 1:
-            rx_buf.extend([tmp])
-            flag = 2
-            break
-        if 126 not in tmp[3] and flag == 1:
-            rx_buf.extend([tmp])
-            flag = 2
-            continue
-        if tmp[3][-1] == 126 and flag == 2:
-            rx_buf.extend([tmp])
-            flag = 3
-            break
-        GL.debug_print('can bus data frame is wrong flag= {} dat is {}'.format(flag,tmp))
-        return None
-    if flag == 2:
-        d1 = rx_buf[0][3]+rx_buf[1][3]
-    if flag == 3 :
-        d1 = rx_buf[0][3]+rx_buf[1][3]+rx_buf[2][3]
-    #pp = [i for i in d1]
-    return d1
-def unpack_lock_data(dat,lock_id=0,opt=0x01):
-    tmp = dat
-    if tmp[0] == 126 and tmp[-1] ==126:
-        if 0x7d in tmp:
-            tmp = frame_lock['remean'](tmp)
-        tmp = tmp[1:-1]
-        tmp_id = tmp[0]
-        #GL.debug_print('tmp_id {}'.format(tmp_id))
-        tmp_length_dat = tmp[1]
-        tmp_key_ind = tmp[2]
-        tmp_dat_type = tmp[3:4]
-        tmp_dat = tmp[4:-2]
-        tmpcrc_add = tmp[-2:]
-        crc_add_frame = crc_add(tmp[:-2])
-        if tmpcrc_add == crc_add_frame:
-            length_dat = tmp_length_dat
-            if (opt & 0x01):
-                d = encrypt_add(tmp_dat_type+tmp_dat, tmp_key_ind)
-            else:
-                d = tmp_dat_type+tmp_dat
-            tmp3 = d[-2:]
-            dcrc_add = crc_add(d[:-2])
-            
-            if tmp3 == dcrc_add:
-                dat_type = d[0]
-                rec_order_type = dat_type
-                if tmp_id in [i for i in range(GL.N_lock)]:
-                    current_ls = d[1] & 0x0f
-                    current_ws = (d[1] & 0xf0)>>4
-                    GL.lose_lock[tmp_id] += 1
-                    GL.debug_print('the {}th lock,  lock_status is {}, current_ws is {}'.format(tmp_id,current_ls,current_ws))
+            print('there is no {}th channel'.format(n))
+            return None
 
-                    if current_ls == 4:
-                        locks_power_off()
-                        lcd_lock['s_a']()
-                        
-                        #lcd_lock['update_e'](tmp_id)
-                        
-                        '''
-                        alarm(4)
-                        #send_1003()
-                        #################report
-                        '''
-                    '''
-                    else:
-                        lcd_lock['update_e'](tmp_id,0)
-                    '''
-                    '''
-                    if current_ls == 3 or current_ws == 1:
-                        lcd_lock['s_a']()
-                    else:
-                        lcd_lock['c_a']()
-                    '''
-                    if current_ls != GL.ls[tmp_id]:
-                        lcd_lock['s_a']()
-                    GL.ls[tmp_id] = current_ls
-                    GL.ws[tmp_id] = current_ws
-                    
-                    if tmp_id < 8:
-                        lcd_lock['update_li'](tmp_id,current_ws,current_ls)
-                    
-                rx_dat = d[1]
-                random_num = d[2:7]
-                return rx_dat,random_num
-                #return d[1:7]
-            else:
-                GL.debug_print('data crc_add is wrong')
+    def locks_power_opreate(self,mode):
+        '''
+           mode-on(1) or off(0)
+        '''
+        for i in self.p:
+            i.value(not mode)
+        return 1
+    def locks_power_on(self):
+        return self.locks_power_opreate(n,1)
+    def locks_power_off(self):
+        return self.locks_power_opreate(n,0)
+    def locks_power_status(self):
+        out = bytearray()
+        for i in range(len(self.p)):
+            out.extend(lock_power_status(i+1))
+        return out
+
+
+    def lose_lock_init(self):
+        for i in range(self.N_lock):
+            self.lose_lock[i] = [5 if self.lock_status[i] else 0][0]
+    def update_lock_status(self):
+        for i in range(self.N_lock):
+            if self.ws[i] == 0:
+                self.ls[i] = 0
+        self.lock_status = [int(hex(i<<4),16) + j for i,j in zip(self.ws,self.ls)]
+
+
+
+
+
+    def pack_lock_data(self,dat_type,dat,lock_id,opt = 0x01):
+        if isinstance(dat_type,int):
+            dat_type = (dat_type).to_bytes(1,'little')
+        if isinstance(lock_id,int):
+            lock_id = (lock_id).to_bytes(1,'little')
+        key_index = os.urandom(1)
+        if 0 <= lock_id[0] <= 15:
+            length_dat = len(dat)+1
+            if length_dat > 255:
+                print('data is too long, Please make it less than 255')
                 return None
+            if dat_type not in MicropyLOCK.order_list:
+                print('dat_type is not in the list')
+                return None
+            data = dat_type + dat
+            if (opt & 0x01):
+                data = encrypt_add(data, key_index[0])
+            tmp_head = lock_id+(length_dat).to_bytes(1,'little') + key_index
+            crc_ = crc_add( tmp_head + data)
+            tx_buf = tmp_head + data + crc_
+            tx_buf = tx_buf.replace(b'\x7d', b'\x7d\x01').replace(b'\x7e',b'\x7d\x02')
+            lock_tx_buf = b'~' + tx_buf+ b'~'
+            #return lock_tx_buf
+            return self.split_by_n(lock_tx_buf)
         else:
-            GL.debug_print ('crc_add error')
-            return None
-        #GL.lock_timeout[tmp_id] = ticks_ms()
-    else: 
-        GL.debug_print('data is not one frame')
-        return None
-
-
-
-
-
-def check_lock(lock_id,n = 1):
-    for i in range(n):
-        tx_dat = check_lock_frame(lock_id,[])
-        if send_lock_dat(tx_dat):
+            print('The lock id is not in the list')
+    def split_by_n(self,dat,n=8):
+        if isinstance(dat,bytes):
+            dat = [i for i in dat]
+        out_n = len(dat[::n])
+        out = [bytearray(n)]*out_n
+        for i in range(out_n):
             try:
-                rx_buf = rec_lock_dat()
-                rx_dat,random_num = unpack_lock_data(rx_buf,lock_id)
-                return rx_dat,random_num
+                out[i] = bytearray(dat[i*n:i*n+n])
+            except:
+                out[i] = bytearray(dat[i*n:])
+        #tx_dat = out
+        self.tx_dat = out
+        return 1
+    def opreate_lock_frame(self,lock_id,random_num,order):
+        '''order 0-check lock   1-open lock   2-close lock'''
+        if order == 0:
+            tmp1 = os.urandom(6)
+            comm = MicropyLOCK.order_list[0:1]
+        elif order in [1,2]:
+            tmp1 = (order).to_bytes(1,'little')+ bytes(random_num)
+            comm = MicropyLOCK.order_list[1:2]
+        else:
+            print('order is wrong')
+            return None
+        tmp2 = crc_add(comm + tmp1)
+        return self.pack_lock_data(comm,tmp1 + tmp2,lock_id)
+    def check_lock_frame(self,lock_id,random_num):
+        return self.opreate_lock_frame(lock_id,random_num,0)
+    def open_lock_frame(self,lock_id,random_num):
+        return self.opreate_lock_frame(lock_id,random_num,1)
+    def close_lock_frame(self,lock_id,random_num):
+        return self.opreate_lock_frame(lock_id,random_num,2)
+
+
+
+
+
+    def send_lock_dat(self):
+        host_can_id = 0x7ff
+        print('the data will be sent soon is for {}th lock'.format(self.tx_dat[0][1]))
+        for i in range(len(self.tx_dat)):
+            try:
+                self.can.send(self.tx_dat[i], host_can_id)
             except:
                 continue
-    if  GL.lose_lock[lock_id] <= 0:
-        GL.debug_print('the {}th lock has losed for 5 times'.format(lock_id))
-        GL.ls[lock_id] = 5
-        #GL.ws[lock_id] = 5
-        lcd_lock['update_li'](lock_id,GL.ws[lock_id],GL.ls[lock_id])
+        self.lose_lock[self.tx_dat[0][1]] -= 1
+        self.current_lock_id = self.tx_dat[0][1]
+        return 1
 
-def opteate_lock(order,lock_id=0):
-    clear_fifo()
-    status = sta[order]
-    status_dict = {'open':'close','close':'open'}
-    frame_type_dict = {'close':close_lock_frame,'open':open_lock_frame}
-    try:
-        rx_dat,random_num = check_lock(lock_id)
-    except:
-        return None
-    if GL.ls[lock_id] in [sta[status_dict[order]],sta['unnormal']]:
-        tx_dat = frame_type_dict[order](lock_id,random_num)
-        if send_lock_dat(tx_dat):
-            while not GL.can.any(fifo):
+    def rec_lock_dat(self,lock_id = 100,timeover=0):
+
+        flag = 0
+        rx_buf = []
+        if lock_id == 100:
+            lock_id = self.current_lock_id
+        if timeover == 0 :
+            time_tmp = MicropyLOCK.can_timeout_ms
+        else:
+            time_tmp = timeover
+        while True:
+            try:
+                tmp = self.can.recv(0,timeout=time_tmp)
+            except:
+                return None
+            #print('recv1 can data is ()'format(tmp))
+            if tmp[3][0] == 126 and flag == 0:
+                rx_buf.extend([tmp])
+                flag = 1
                 continue
-            rx_buf = rec_lock_dat()
-            rx_dat,random_num = unpack_lock_data(rx_buf,lock_id)
-            return rx_dat,random_num
-        else:
-            GL.debug_print('send data error')
-            raise
-    elif GL.ls[lock_id] == sta[order]:
-        alarm(3)
-    else:
-        alarm(4)
-        ####################
-def close_lock(lock_id=0):
-    return opteate_lock('close',lock_id)
-def open_lock(lock_id=0):
-    return opteate_lock('open',lock_id)
+            if tmp[3][-1] == 126 and flag == 1:
+                rx_buf.extend([tmp])
+                flag = 2
+                break
+            if 126 not in tmp[3] and flag == 1:
+                rx_buf.extend([tmp])
+                flag = 2
+                continue
+            if tmp[3][-1] == 126 and flag == 2:
+                rx_buf.extend([tmp])
+                flag = 3
+                break
+            print('can bus data frame is wrong flag= {} dat is {}'.format(flag,tmp))
+            return None
+        if flag == 2:
+            d1 = rx_buf[0][3]+rx_buf[1][3]
+        if flag == 3 :
+            d1 = rx_buf[0][3]+rx_buf[1][3]+rx_buf[2][3]
+        #pp = [i for i in d1]
+        return self.unpack_lock_data(d1,lock_id)
+    def unpack_lock_data(self,dat,lock_id=0,opt=0x01):
+        print('unpack_lock_data function')
+        tmp = dat
+        if tmp[0] == 126 and tmp[-1] ==126:
+            if 0x7d in tmp:
+                tmp = tmp.replace(b'\x7d\x01',b'\x7d').replace(b'\x7d\x02',b'\x7e')
+            tmp = tmp[1:-1]
+            tmp_id = tmp[0]
+            #print('tmp_id {}'.format(tmp_id))
+            tmp_length_dat = tmp[1]
+            tmp_key_ind = tmp[2]
+            tmp_dat_type = tmp[3:4]
+            tmp_dat = tmp[4:-2]
+            tmpcrc_add = tmp[-2:]
+            crc_add_frame = crc_add(tmp[:-2])
+            if tmpcrc_add == crc_add_frame:
+                length_dat = tmp_length_dat
+                if (opt & 0x01):
+                    d = encrypt_add(tmp_dat_type+tmp_dat, tmp_key_ind)
+                else:
+                    d = tmp_dat_type+tmp_dat
+                tmp3 = d[-2:]
+                dcrc_add = crc_add(d[:-2])
+                
+                if tmp3 == dcrc_add:
+                    dat_type = d[0]
+                    rec_order_type = dat_type
+                    if tmp_id in [i for i in range(self.N_lock)]:
+                        current_ls = d[1] & 0x0f
+                        current_ws = (d[1] & 0xf0)>>4
+                        self.lose_lock[tmp_id] += 1
+                        print('the {}th lock,  lock_status is {}, current_ws is {}'.format(tmp_id,current_ls,current_ws))
+
+                        if current_ls == 4:
+                            locks_power_off()
+                            self.lcd_on = True
+                            #lcd_lock['s_a']()
+                        if current_ls != self.ls[tmp_id] or current_ws != self.ws[tmp_id]:
+                            self.lcd_on = True
+                            self.update_lcd_ls = True
+                            #lcd_lock['s_a']()
+                        self.ls[tmp_id] = current_ls
+                        self.ws[tmp_id] = current_ws
+
+                        '''
+                        if tmp_id < 8:
+                            lcd_lock['update_li'](tmp_id,current_ws,current_ls)
+                        '''
+                    self.rx_dat = d[1]
+                    self.random_num = d[2:7]
+                    return 1
+                    #return rx_dat,random_num
+                    #return d[1:7]
+                else:
+                    print('data crc_add is wrong')
+                    return None
+            else:
+                print ('crc_add error')
+                return None
+            #self.lock_timeout[tmp_id] = ticks_ms()
+        else: 
+            print('data is not one frame')
+            return None
 
 
 
 
-def clear_fifo():
-    if GL.can.any(fifo):
-        while GL.can.any(fifo):
-            rx_dat = rec_lock_dat()
-    return 1
-def opteate_locks(order):
-    clear_fifo()
-    order_dict = {'check':check_lock,'close':close_lock,'open':open_lock}
-    for i in range(GL.N_lock):
-        if not GL.lock_status[i]:
-            continue
-        else:
-            order_dict[order](i)
-    return 1
+
+    def opteate_lock(self,lock_id,order,n = 1):
+        '''
+        order = 0---check
+                1---open
+                2---close
+        '''
+        frame_type_dict = {2:self.close_lock_frame,1:self.open_lock_frame,0:self.check_lock_frame}
+        for i in range(n):
+            if frame_type_dict[order](lock_id,self.random_num):
+                if self.send_lock_dat():
+                    if  self.lose_lock[lock_id] <= 0:
+                        print('the {}th lock has losed for 5 times'.format(lock_id))
+                        self.ls[lock_id] = 5
+                        #lcd_lock['update_li'](lock_id,self.ws[lock_id],self.ls[lock_id])
+                    return self.rec_lock_dat(lock_id)
+
+    def check_lock(self,lock_id=0):
+        return self.opteate_lock(lock_id,0)
+    def open_lock(self,lock_id=0):
+        return self.opteate_lock(lock_id,1)
+    def close_lock(self,lock_id=0):
+        return self.opteate_lock(lock_id,2)
+
+
+
+
+
+    def clear_fifo(self):
+        if self.can.any(0):
+            while self.can.any(0):
+                self.rec_lock_dat()
+        return 1
+    def opteate_locks(self,order):
+        self.clear_fifo()
+        order_dict = {'check':self.check_lock,'open':self.open_lock,'close':self.close_lock}
+        for i in range(self.N_lock):
+            if not self.lock_status[i]:
+                continue
+            else:
+                order_dict[order](i)
+        return 1
 
     
-def check_locks():
-    opteate_locks('check')
-    update_lock_status()
-    return 1
-def open_locks():
-    return opteate_locks('open')
-def close_locks():
-    return opteate_locks('close')
+    def check_locks(self):
+        self.opteate_locks('check')
+        self.update_lock_status()
+        return 1
+    def open_locks(self):
+        return self.opteate_locks('open')
+    def close_locks(self):
+        return self.opteate_locks('close')
 
-'''
-locks_fun = {'check':check_locks,'open':open_locks:'close':close_locks}
-lock_fun = {'check':check_lock,'open':open_lock:'close':close_lock}
-locks_pow_fun = {'locks_on':locks_power_on,'locks_off':locks_power_off,'locks_status':locks_power_status}
-lock_pow_fun = {'lock_on':lock_power_on,'lock_off':lock_power_off,'lock_status':lock_power_status}
-'''
-lock_sys = {'init':can_init, 'checks':check_locks, 'opens':open_locks, 'closes':close_locks,'ll_init':lose_lock_init,
-'light_3min':start_ns_delay,'lp_offs':locks_power_off,'lp_ons':locks_power_on,'update_ls':update_lock_status}
-
-lock_gnss={'lp_ons':locks_power_on,'lp_offs':locks_power_off,'lp_off':lock_power_off,'lp_on':lock_power_on,
-'checks':check_locks,'update_ls':update_lock_status}
-
-lock_gprs={'open':open_lock,'close':close_lock,'opens':open_locks,'closes':close_locks,'lp_ons':locks_power_on,
-'lp_offs':locks_power_off,'update_ls':update_lock_status,'ll_init':lose_lock_init}
-
-
-lock_main = {'checks':check_locks,'lp_ons':locks_power_on,'lp_offs':locks_power_off,'update_ls':update_lock_status}

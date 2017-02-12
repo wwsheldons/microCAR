@@ -20,24 +20,28 @@ def bcd2int(a):
 
 
 
-class MicropyGPS(object):
+class MicropyGNSS(object):
     """GPS NMEA Sentence Parser. Creates object that stores all relevant GPS data and statistics.
-    Parses sentences one character at a time using update(). """
+    Parses sentences one character at a time using update(). 
+
+    """
 
     # Max Number of Characters a valid sentence can be (based on GGA sentence)
     SENTENCE_LIMIT = 76
     #__HEMISPHERES.keys() = ('N', 'S', 'E', 'W')
     __HEMISPHERES = {'N':b'1', 'S':b'2', 'E':b'1', 'W':b'2'}
-    __NO_FIX = 1
-    __FIX_2D = 2
-    __FIX_3D = 3
     #__FIELD_LENGTH = (1,8,8,1,9,1,10,4,3,6,2,1,1,1,1,1,1,1,1,1) #the length of each field 
     
-    def __init__(self, local_offset=0):
+    def __init__(self, gnss_port,pins,local_offset=0):
         '''
         Setup GPS Object Status Flags, Internal Data Registers, etc
         '''
-
+        self.gnss_port = gnss_port
+        self.gnss_reset = pins[0]
+        self.gnss_reset.low()
+        self.battery_voltage = pins[1]
+        self.vcc_voltage = pins[2]
+        self.control_cover = pins[3]
         #####################
         # Object Status Flags
         self.sentence_active = False
@@ -65,8 +69,8 @@ class MicropyGPS(object):
 
         # Position/Motion
         self.speed_kmh = 0
-        self.latitude = ''
-        self.longitude = ''
+        self.latitude = 0.0
+        self.longitude = 0.0
         
         self.course = ''
         self.altitude = ''
@@ -90,12 +94,22 @@ class MicropyGPS(object):
         self.update_gnrmc = False
         self.update_gngga = False
 
-        #clear buf
+        # flag bit for other thread
+        self.vcc_below_14V = False
+        self.vcc_over_19V = False
+        self.battery_below_10V = False
+
+
+        # clear buf
         self.clear_buf()
 
     def clear_buf(self):
-        self.gnss_buf = bytearray('216-06-0320:08:0023447.9072111335.68360123000000.00001111*****', 'utf-8')
+        try:
+            self.gnss_buf = bytearray('216-06-0320:08:0023447.9072111335.68360123000000.00001111*****', 'utf-8')
+        except:
+            self.gnss_buf = bytearray('216-06-0320:08:0023447.9072111335.68360123000000.00001111*****')
         '''
+        #length of gnss_buf is 62
         self.gnss_buf = ['0']*20
         self.gnss_buf[0] = '2' # 2-invalid 1-valid
         self.gnss_buf[1] = '16-06-03' # date
@@ -195,15 +209,15 @@ class MicropyGPS(object):
 
             # Get Fix Status
             fix_stat = int(self.gps_segments[6])
-            self.gnss_buf[0:1] = self.gps_segments[6].encode()
+            #self.gnss_buf[0:1] = self.gps_segments[6].encode()
             
         except ValueError:
             return False
 
         # Process Location and Speed Data if Fix is GOOD
         if fix_stat:
-
             # Longitude / Latitude
+            self.gnss_buf[0:1] = b'1'
             try:
                 # Latitude
                 l_string = self.gps_segments[2]
@@ -212,13 +226,14 @@ class MicropyGPS(object):
                 lat_hemi = self.gps_segments[3]
                 self.gnss_buf[18:27] = '{:0>09}'.format(self.gps_segments[2][:9]).encode()
                 self.gnss_buf[27:28] = self.__HEMISPHERES[lat_hemi]
-                
+                self.latitude = float(bytes(self.gnss_buf[18:27]).decode())
                 # Longitude
                 l_string = self.gps_segments[4]
                 lon_degs = int(l_string[0:3])
                 lon_mins = float(l_string[3:])
                 lon_hemi = self.gps_segments[5]
                 self.gnss_buf[28:38] = '{:0>010}'.format(self.gps_segments[4][:10]).encode()
+                self.longitude = float(bytes(self.gnss_buf[28:38]).decode())
                 self.gnss_buf[27:28] = self.__HEMISPHERES[lon_hemi]
             except ValueError:
                 return False
@@ -244,6 +259,8 @@ class MicropyGPS(object):
             self.altitude = altitude
             self.geoid_height = geoid_height
             '''
+        else:
+            self.gnss_buf[0:1] = b'2'
         # Update Object Data
         '''
         self.timestamp = (hours, minutes, seconds)
@@ -310,6 +327,8 @@ class MicropyGPS(object):
                 lat_hemi = self.gps_segments[4]
                 self.gnss_buf[17:18] = self.__HEMISPHERES[lat_hemi]
                 self.gnss_buf[18:27] = '{:>09}'.format(self.gps_segments[3][:9]).encode()
+                #print(self.gnss_buf[18:27])
+                self.latitude = float(bytes(self.gnss_buf[18:27]).decode())
                 # Longitude
                 l_string = self.gps_segments[5]
                 lon_degs = int(l_string[0:3])
@@ -317,7 +336,7 @@ class MicropyGPS(object):
                 lon_hemi = self.gps_segments[6]
                 self.gnss_buf[27:28] = self.__HEMISPHERES[lon_hemi]
                 self.gnss_buf[28:38] = '{:>010}'.format(self.gps_segments[5][:10]).encode()
-
+                self.longitude = float(bytes(self.gnss_buf[28:38]).decode())
             except ValueError:
                 return False
 
@@ -362,6 +381,7 @@ class MicropyGPS(object):
         else:  # Clear Position Data if Sentence is 'Invalid'
 
             self.gnss_buf[0:1] = b'2'
+
             '''
             self.latitude = (0, 0.0, 'N')
             self.longitude = (0, 0.0, 'W')
@@ -373,197 +393,40 @@ class MicropyGPS(object):
         self.update_gnrmc = True
         return True
 
-    def gpgll(self):
-        """Parse Geographic Latitude and Longitude (GLL)Sentence. Updates UTC timestamp, latitude,
-        longitude, and fix status"""
-
-        # UTC Timestamp
-        try:
-            utc_string = self.gps_segments[5]
-
-            if utc_string:  # Possible timestamp found
-                hours = int(utc_string[0:2]) + self.local_offset
-                minutes = int(utc_string[2:4])
-                seconds = float(utc_string[4:])
-                self.timestamp = (hours, minutes, seconds)
-            else:  # No Time stamp yet
-                self.timestamp = (0, 0, 0)
-
-        except ValueError:  # Bad Timestamp value present
-            return False
-
-        # Check Receiver Data Valid Flag
-        if self.gps_segments[6] == 'A':  # Data from Receiver is Valid/Has Fix
-
-            # Longitude / Latitude
-            try:
-                # Latitude
-                l_string = self.gps_segments[1]
-                lat_degs = int(l_string[0:2])
-                lat_mins = float(l_string[2:])
-                lat_hemi = self.gps_segments[2]
-
-                # Longitude
-                l_string = self.gps_segments[3]
-                lon_degs = int(l_string[0:3])
-                lon_mins = float(l_string[3:])
-                lon_hemi = self.gps_segments[4]
-            except ValueError:
-                return False
-
-            if lat_hemi not in self.__HEMISPHERES.keys():
-                return False
-
-            if lon_hemi not in self.__HEMISPHERES.keys():
-                return False
-
-            # Update Object Data
-            self.latitude = (lat_degs, lat_mins, lat_hemi)
-            self.longitude = (lon_degs, lon_mins, lon_hemi)
-            self.valid = True
-
-            # Update Last Fix Time
-            self.new_fix_time()
-
-        else:  # Clear Position Data if Sentence is 'Invalid'
-            self.latitude = (0, 0.0, 'N')
-            self.longitude = (0, 0.0, 'W')
-            self.valid = False
-
-        return True
-
-    def gpvtg(self):
-        """Parse Track Made Good and Ground Speed (VTG) Sentence. Updates speed and course"""
-        try:
-            course = float(self.gps_segments[1])
-            spd_knt = float(self.gps_segments[5])
-        except ValueError:
-            return False
-
-        # Include mph and km/h
-        self.speed_kmh = spd_knt * 1.852
-        #self.speed_kmh = (spd_knt, spd_knt * 1.151, spd_knt * 1.852)
-        self.course = course
-        return True
-
-    
-
-    def gpgsa(self):
-        """Parse GNSS DOP and Active Satellites (GSA) sentence. Updates GPS fix type, list of satellites used in
-        fix calculation, Position Dilution of Precision (PDOP), Horizontal Dilution of Precision (HDOP), Vertical
-        Dilution of Precision, and fix status"""
-
-        # Fix Type (None,2D or 3D)
-        try:
-            fix_type = int(self.gps_segments[2])
-        except ValueError:
-            return False
-
-        # Read All (up to 12) Available PRN Satellite Numbers
-        sats_used = []
-        for sats in range(12):
-            sat_number_str = self.gps_segments[3 + sats]
-            if sat_number_str:
-                try:
-                    sat_number = int(sat_number_str)
-                    sats_used.append(sat_number)
-                except ValueError:
-                    return False
-            else:
-                break
-
-        # PDOP,HDOP,VDOP
-        try:
-            pdop = float(self.gps_segments[15])
-            hdop = float(self.gps_segments[16])
-            vdop = float(self.gps_segments[17])
-        except ValueError:
-            return False
-
-        # Update Object Data
-        self.fix_type = fix_type
-
-        # If Fix is GOOD, update fix timestamp
-        if fix_type > self.__NO_FIX:
-            self.new_fix_time()
-
-        self.satellites_used = sats_used
-        self.hdop = hdop
-        self.vdop = vdop
-        self.pdop = pdop
-
-        return True
-
-    def gpgsv(self):
-        """Parse Satellites in View (GSV) sentence. Updates number of SV Sentences,the number of the last SV sentence
-        parsed, and data on each satellite present in the sentence"""
-        try:
-            num_sv_sentences = int(self.gps_segments[1])
-            current_sv_sentence = int(self.gps_segments[2])
-            sats_in_view = int(self.gps_segments[3])
-        except ValueError:
-            return False
-
-        # Create a blank dict to store all the satellite data from this sentence in:
-        # satellite PRN is key, tuple containing telemetry is value
-        satellite_dict = dict()
-
-        # Calculate  Number of Satelites to pull data for and thus how many segment positions to read
-        if num_sv_sentences == current_sv_sentence:
-            sat_segment_limit = ((sats_in_view % 4) * 4) + 4  # Last sentence may have 1-4 satellites
-        else:
-            sat_segment_limit = 20  # Non-last sentences have 4 satellites and thus read up to position 20
-
-        # Try to recover data for up to 4 satellites in sentence
-        for sats in range(4, sat_segment_limit, 4):
-
-            # If a PRN is present, grab satellite data
-            if self.gps_segments[sats]:
-                try:
-                    sat_id = int(self.gps_segments[sats])
-                except ValueError:
-                    return False
-
-                try:  # elevation can be null (no value) when not tracking
-                    elevation = int(self.gps_segments[sats+1])
-                except ValueError:
-                    elevation = None
-
-                try:  # azimuth can be null (no value) when not tracking
-                    azimuth = int(self.gps_segments[sats+2])
-                except ValueError:
-                    azimuth = None
-
-                try:  # SNR can be null (no value) when not tracking
-                    snr = int(self.gps_segments[sats+3])
-                except ValueError:
-                    snr = None
-
-            # If no PRN is found, then the sentence has no more satellites to read
-            else:
-                break
-
-            # Add Satellite Data to Sentence Dict
-            satellite_dict[sat_id] = (elevation, azimuth, snr)
-
-        # Update Object Data
-        self.total_sv_sentences = num_sv_sentences
-        self.last_sv_sentence = current_sv_sentence
-        self.satellites_in_view = sats_in_view
-
-        # For a new set of sentences, we either clear out the existing sat data or
-        # update it as additional SV sentences are parsed
-        if current_sv_sentence == 1:
-            self.satellite_data = satellite_dict
-        else:
-            self.satellite_data.update(satellite_dict)
-
-        return True
 
     ##########################################
     # Data Stream Handler Functions
     ##########################################
-
+    def update_voltage(self):
+        if self.control_cover.read() > 3900:
+            self.gnss_buf[54:55] = b'2'
+        if self.control_cover.read() < 300:
+            self.gnss_buf[54:55] = b'1'
+        if self.vcc_voltage.read() < 1699: #14V
+            #bat_en.value(1)
+            self.gnss_buf[56:57] = b'0'
+            self.vcc_below_14V = True
+            #lock_gnss['lp_off']()
+            #gprs.send_1003()
+        else:
+            self.gnss_buf[56:57] = b'1'
+        
+        if self.vcc_voltage.read() > 2243: #19V
+            self.gnss_buf[56:57] = b'1'
+            if self.gnss_buf[56:57] == b'0':
+                self.vcc_over_19V = True
+                #lock_gnss['lp_ons']()
+                #self.lock_status = [1]*12
+                #lock_gnss['checks']()
+        else:
+            self.gnss_buf[56:57] == b'0'
+        if self.battery_voltage.read() < 1216: #10V
+            self.gnss_buf[55:56] = b'0'
+            if self.gnss_buf[56:57] == b'0':
+                #lock_gnss['lp_offs']()
+                self.battery_below_10V = True
+        if self.battery_voltage.read() > 1316:
+            self.gnss_buf[55:56] = b'1'
     def new_sentence(self):
         """Adjust Object Flags in Preparation for a New Sentence"""
         self.gps_segments = ['']
@@ -573,13 +436,23 @@ class MicropyGPS(object):
         self.process_crc = True
         self.char_count = 0
 
-    def update(self, new_char):
+    def update(self, new_char = 0):
         """Process a new input char and updates GPS object if necessary based on special characters ('$', ',', '*')
         Function builds a list of received string that are validate by CRC prior to parsing by the  appropriate
         sentence function. Returns sentence type on successful parse, None otherwise"""
 
         valid_sentence = False
-
+        try:
+            if self.gnss_reset.value() == 1:
+                print('N303 is Invalid, Please make the gnss_reset low')
+                return None
+            tmp = self.gnss_port.readchar()
+            if tmp < 0 :
+                #print('N303 is Invalid')
+                return None
+            new_char = chr(tmp)
+        except:
+            pass
         # Validate new_char is a printable char
         ascii_char = ord(new_char)
 
@@ -646,7 +519,9 @@ class MicropyGPS(object):
                             #return self.gps_segments[0]
                             if self.update_gnrmc and self.update_gngga:
                                 self.update_gnrmc = self.update_gngga = False
-                                return self.gnss_buf
+                                #return self.gnss_buf
+                                self.update_voltage()
+                                return 1
                 # Check that the sentence buffer isn't filling up with Garage waiting for the sentence to complete
                 if self.char_count > self.SENTENCE_LIMIT:
                     self.sentence_active = False
@@ -675,33 +550,7 @@ class MicropyGPS(object):
             current = time.time() - self.fix_time
         return current
 
-    def update_add(self,control_cover,vcc_voltage,battery_voltage):
-        if control_cover.read() > 3900:
-            self.gnss_buf[54:55] = b'2'
-        if GL.control_cover.read() < 300:
-            self.gnss_buf[54:55] = b'1'
-        if vcc_voltage.read() < 1699: #14V
-            #bat_en.value(1)
-            self.gnss_buf[56:57] = b'0'
-            #lock_gnss['lp_off']()
-            #gprs.send_1003()
-        else:
-            self.gnss_buf[56:57] = b'1'
-        
-        if vcc_voltage.read() > 2243: #19V
-            self.gnss_buf[56:57] = b'1'
-            if self.gnss_buf[56:57] == b'0':
-                #lock_gnss['lp_ons']()
-                GL.lock_status = [1]*12
-                #lock_gnss['checks']()
-        else:
-            self.gnss_buf[56:57] == b'0'
-        if battery_voltage.read() < 1216: #10V
-            self.gnss_buf[55:56] = b'0'
-            #if self.gnss_buf[56:57] == b'0':
-                #lock_gnss['lp_offs']()
-        if battery_voltage.read() > 1316:
-            self.gnss_buf[55:56] = b'1'
+    
 
     # All the currently supported NMEA sentences
     supported_sentences = {'GNRMC': gnrmc, 'GNGGA': gngga,'GPRMC':gnrmc, 'GPGGA':gngga}
@@ -709,7 +558,15 @@ class MicropyGPS(object):
     @property
     def speed(self):
         return self.speed_kmh
-
+    @property
+    def get_pos(self):
+        return (self.latitude,self.longitude)
+    @property
+    def g(self):
+        if self.gnss_buf[0:1] == b'1':
+            return 1
+        else:
+            return 0
 
 def test():
     test_sentence = [b'$GPRMC,081836,A,3751.65,S,14507.36,E,000.0,360.0,130998,011.3,E*62\n',
@@ -720,9 +577,11 @@ def test():
                 b'$GPRMC,092751.000,A,5321.6802,N,00630.3371,W,0.06,31.66,280511,,,A*45\n']
     my_gps = MicropyGPS()
     for sentence in test_sentence:
-            for y in sentence:
-                buf = my_gps.update(chr(y))
-                if buf:
-                    print(my_gps.gnss_buf)
+        for y in sentence:
+            buf = my_gps.update(chr(y))
+            if buf:
+                print(my_gps.gnss_buf)
+        print('my_gps.latitude,my_gps.longitude = {},{}'.format(my_gps.latitude,my_gps.longitude))
+        print('my_gps.speed_kmh= {}'.format(my_gps.speed_kmh))
 
 #test()

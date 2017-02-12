@@ -9,7 +9,7 @@
 
 import gc
 from utime import ticks_us
-from sys import platform
+#from sys import platform
 try:
     from micropython import const
 except ImportError:
@@ -139,8 +139,10 @@ def wait(secs):
 class Pinblock(Waitfor):
     initialised = False
     def __init__(self, pin, mode, pull, customcallback = None, timeout = None):
+        '''
         if platform != 'pyboard':
             raise ValueError('Pinblock only valid on Pyboard')
+        '''
         super().__init__()
         if not Pinblock.initialised:
             import pyb
@@ -187,6 +189,12 @@ class Sched(object):
         self.last_heartbeat = 0
         self.heartbeat = heartbeat
         if heartbeat is not None:
+            if heartbeat > 0 and heartbeat < 5:
+                import pyb
+                self.heartbeat = pyb.LED(heartbeat)
+            else:
+                raise ValueError('heartbeat must be a valid LED no.')
+            '''
             if platform == 'pyboard':
                 if heartbeat > 0 and heartbeat < 5:
                     import pyb
@@ -196,7 +204,7 @@ class Sched(object):
             elif platform == 'esp8266':
                 import machine
                 self.heartbeat = machine.Pin(2, machine.Pin.OUT)
-
+            '''
     def __getitem__(self, pid):                 # Index by pid
         threads = [thread for thread in self.lstThread if thread[PID] == pid]
         if len(threads) == 1:
@@ -248,13 +256,17 @@ class Sched(object):
     def _idle_thread(self):
         if self.gc_enable and (self.last_gc == 0 or after(self.last_gc) > GCTIME):
             gc.collect()
-            gc.threshold(gc.mem_free() // 4 + gc.mem_alloc())
+            #gc.threshold(gc.mem_free() // 4 + gc.mem_alloc())
             self.last_gc = ticks_us()
         if self.heartbeat is not None and (self.last_heartbeat == 0 or after(self.last_heartbeat) > HBTIME):
+            self.heartbeat.toggle()
+            '''
             if platform == 'pyboard':
                 self.heartbeat.toggle()
             elif platform == 'esp8266':
                 self.heartbeat(not self.heartbeat())
+            '''
+
             self.last_heartbeat = ticks_us()
 
     def triggered(self, thread):

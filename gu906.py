@@ -1,4 +1,5 @@
 #modify by wjy @20170106
+
 from math import floor
 from aes128 import encrypt,decrypt
 from dd import get_key
@@ -35,7 +36,7 @@ def retransferred_meaning(dat):
     return dat.replace(b'\x7d\x01',b'\x7d').replace(b'\x7d\x02',b'\x7e')
 def _generate_crc_table():
     POY = 0xEDB88320
-    crc_table = [0]*256
+    #crc_table = [0]*256
     for i in range(256):
         cell = i
         for j in range(8):
@@ -68,15 +69,10 @@ class MicropyGPRS(object):
 
     # Max Number of Characters a valid sentence can be (based on module limited)
     SENTENCE_LIMIT = 1000
-    #__HEMISPHERES.keys() = ('N', 'S', 'E', 'W')
-    __HEMISPHERES = {'N':b'1', 'S':b'2', 'E':b'1', 'W':b'2'}
-    __NO_FIX = 1
-    __FIX_2D = 2
-    __FIX_3D = 3
     
-    def __init__(self, hw_port,hw_en, ip='101.201.105.176', port=8080, _id=b'AP9904N0769', pwd='123456', local_offset=0):
+    def __init__(self, hw_port,hw_en, ip='101.201.105.176', port=5050, _id=b'AP9904N0769', pwd='123456'):
         '''
-        Setup GPS Object Status Flags, Internal Data Registers, etc
+        Setup GPRS Object Status Flags, Internal Data Registers, etc
         '''
         #####################
         # hardware
@@ -121,7 +117,11 @@ class MicropyGPRS(object):
 
         #####################
         # hardware init
-        #self.gprs_init()
+        try:
+            self.gprs_init()
+            self.connect()
+        except:
+            pass
 
     def gprs_init(self):
         self.hw_port.init(115200, read_buf_len=512)
@@ -134,7 +134,10 @@ class MicropyGPRS(object):
         #self.debug_print('send order is {}'.format(order))
         if self.hw_port.write('{}\r\n'.format(order)) == len(order)+2:
             self.ats_dict[order] = 0
-            return 1
+            while True:
+                if self.update():
+                    return 1
+            
         return 0
     def send_d(self,d):
         if not isinstance(d,bytearray):
@@ -152,10 +155,10 @@ class MicropyGPRS(object):
             conect_()
         '''
         order = 'AT+CIPSEND={},1'.format(len(d))
-        send_at(order)
+        self.send_at(order)
         #send_at('AT+CIPSEND={}'.format(len(d)))#bin type
-        if ats_dict[order]:
-            return send_d(d)
+        if self.ats_dict[order]:
+            return self.send_d(d)
     ## sms correlation 
     def rec_sms(self,num=1):
         return self.send_at('AT+CMGR={}'.format(num)) # the {num}th sms
@@ -178,19 +181,23 @@ class MicropyGPRS(object):
         self.rssi = 0
         return self.send_at('AT+CSQ')
     def get_location_gu(self):
-        return send_at('AT+ENBR')
+        return self.send_at('AT+ENBR')
     #def conect_(ip = "101.201.105.176",port = 5050,apn='',usr = '',passwd=''):
-    def connect(self,ip,port):
+    def connect(self):
         '''
         if apn != '' :
             send_at('AT+CSTT={},{},{}'.format(apn,usr,passwd))
             return GL.m
         '''
-        send_at('AT+CSTT="CMNET","",""')
-        if ats_dict['AT+CSTT="CMNET","",""']:
-            send_at('AT+CGATT=1')
-            if ats_dict['AT+CGATT=1']:
-                return send_at('AT+CIPSTART="TCP","{}",{}'.format(ip,port))
+        self.send_at('AT+CSTT="CMNET","",""')
+        self.send_at('AT+CGATT=1')
+        self.send_at('AT+CIPSTART="TCP","{}",{}'.format(self.ip,self.port))
+        '''
+        if self.ats_dict['AT+CSTT="CMNET","",""']:
+            self.send_at('AT+CGATT=1')
+            if self.ats_dict['AT+CGATT=1']:
+                return self.send_at('AT+CIPSTART="TCP","{}",{}'.format(self.ip,self.port))
+        '''
     ########################################
     # data from server Parsers
     ########################################
@@ -344,6 +351,24 @@ class MicropyGPRS(object):
     ########################################
     # Sentence Parsers
     ########################################
+    def parser(self,opt):
+        self.tmp_record_flag = True
+        #print('self.gprs_segments is {}'.format(self.gprs_segments))
+        tmp = False
+        if opt == 'AT':
+            tmp = self.at()
+        if opt == 'data':
+            tmp = self.data()
+        if opt == 'server':
+            tmp = self.server()
+
+        self.gprs_segments = [b'']
+        self.active_segment = 0
+        self.char_count = 0
+
+        if tmp:
+            return True
+        return False
 
     def at(self):
         """Parse at order Include 'AT','ATZ','AT+CMGF=1','AT+CNUM=?','AT+CSQ','AT+CIPCLOSE=0',
@@ -374,7 +399,7 @@ class MicropyGPRS(object):
                         reply: b'AT+IPR=115200\r\n\r\nOK\r\n'
         'AT+FTPSERV=addr','AT+FTPGETNAME=filename',''AT+FTPUN=usr','AT+FTPPW=pwd','AT+FTPGET=1'(FTP order)
         """
-        self.tmp_record_flag = True
+        #self.tmp_record_flag = True
         try:
             at_order = self.gprs_segments[0]
             if b'CMGR' in at_order:
@@ -382,12 +407,20 @@ class MicropyGPRS(object):
             order_reply_len = [3 if b'CSQ' in at_order else 2][0]
             if len(self.gprs_segments) != order_reply_len:
                 return False
+            
 
             module_reply = self.gprs_segments[-1]
             # Skip timestamp if receiver doesn't have on yet
-            if b'OK' == module_reply or b'>' == module_reply:
+            if b'AT+CIPSTART' in at_order:
+                if b'+CME ERROR: 2' in module_reply:
+                    self.m = 0
+                    self.send_at('AT+CIPCLOSE=0')
+                if b'OK' in module_reply:
+                    self.m = 1
+                #return None
+            if b'OK' in module_reply or b'>' == module_reply:
                 #print('at_order is {}'.format(at_order))
-                self.ats_dict[at_order] = 1
+                self.ats_dict[at_order.decode()] = 1
             if b'CSQ' in at_order:
                 dat = self.gprs_segments[1]
                 try:
@@ -397,13 +430,16 @@ class MicropyGPRS(object):
                     return False
         except ValueError:
             return False
-        self.gprs_segments = [b'']
-        self.active_segment = 0
-        self.char_count = 0
+        
         '''
         # If Fix is GOOD, update fix timestamp
         if fix_stat:
             self.new_fix_time()
+        '''
+        '''
+        self.gprs_segments = [b'']
+        self.active_segment = 0
+        self.char_count = 0
         '''
         return True
 
@@ -424,36 +460,41 @@ class MicropyGPRS(object):
 
         except ValueError:  # Bad Timestamp value present
             return False
-
+        '''
         self.gprs_segments = [b'']
         self.active_segment = 0
         self.char_count = 0
+        '''
         return True
 
     def server(self):
         #print(self.gprs_segments)
-        self.tmp_record_flag = True
+        #self.tmp_record_flag = True
 
         if len(self.gprs_segments) != 3 or self.gprs_segments[2] != b'\r\n':
             print('gprs_segments format is wrong')
             return False
         try :
             rx_buf = self.gprs_segments[1]
+            '''
             self.gprs_segments = [b'']
             self.active_segment = 0
             self.char_count = 0
+            '''
             # print('rx_buf is {}'.format(rx_buf))
             return self.unpack_server_data(rx_buf)
         except ValueError:
             return False
     def data(self):
-        self.tmp_record_flag = True
-
+        
+        #self.tmp_record_flag = True
         self.tx_buf = b''
         print('this data is just been sended')
+        '''
         self.gprs_segments = [b'']
         self.active_segment = 0
         self.char_count = 0
+        '''
         return 1
 
     ##########################################
@@ -479,45 +520,49 @@ class MicropyGPRS(object):
             self.sentence_server_active = True
         else:
             pass
-    
-    def update(self, new_char):
-        """Process a new input char and updates GPS object if necessary based on special characters ('$', ',', '*')
+    def update(self,new_char = 0):
+        if not new_char:
+            if self.hw_port.any():
+                return self._update(chr(self.hw_port.readchar()))
+            return None
+        else:
+            return self._update(new_char)
+
+    def _update(self, new_char):
+        """Process a new input char and updates GPRS object if necessary based on special characters ('AT', '\r\n', '*')
         Function builds a list of received string that are validate by CRC prior to parsing by the  appropriate
         sentence function. Returns sentence type on successful parse, None otherwise"""
 
         valid_at_sentence = False
         valid_data_sentence = False
         valid_server_sentence = False
-        # Validate new_char is a printable char
-        # ascii_char = ord(new_char)
+        # Validate ascii_char is a printable char
+        ascii_char = ord(new_char)
         
         self.char_count += 1
-        #print('new_char is {}'.format(new_char))
-        #print('active_segment is {}'.format(self.active_segment))
-        #print('gprs_segments is {}'.format(self.gprs_segments))
         
 
-        if new_char == 0:
+        if ascii_char == 0:
             if self.tmp_record_flag:
                 self.tmp_record +=  b'\x00'
             else:
                 self.gprs_segments[self.active_segment] += b'\x00'
         else:
             if self.tmp_record_flag:
-                self.tmp_record +=  int_to_bytes(new_char)
+                self.tmp_record +=  int_to_bytes(ascii_char)
             else:
-                self.gprs_segments[self.active_segment] += int_to_bytes(new_char)
+                self.gprs_segments[self.active_segment] += int_to_bytes(ascii_char)
         #print('gprs_segments is {}'.format(self.gprs_segments))
 
         # Check if a new string is starting ('AT')
-        #if new_char == int_from_bytes(b'T') and self.gprs_segments[self.active_segment][-2] == int_from_bytes(b'A'):
-        if len(self.tmp_record) == 2 and self.tmp_record == b'AT':
+        #if ascii_char == int_from_bytes(b'T') and self.gprs_segments[self.active_segment][-2] == int_from_bytes(b'A'):
+        if len(self.tmp_record) >= 2 and self.tmp_record[-2:] == b'AT':
             self.new_sentence('AT')
             return False
 
         if self.sentence_at_active:
-            # Validate new_char is a printable char
-            if 10 <= new_char <= 126:
+            # Validate ascii_char is a printable char
+            if 10 <= ascii_char <= 126:
                 #print('self.gprs_segments is {}'.format(self.gprs_segments))
                 # Check if sentence is ending ('\r\n' over three times or '>'(AT+CIPSEND=109,1))
                 '''
@@ -532,7 +577,7 @@ class MicropyGPRS(object):
                 #if b'AT+CMGR' in self.gprs_segments[0] 
                 #### \r\n   13 10
                 
-                if (new_char == 10) and (self.gprs_segments[self.active_segment][-2] == 13):
+                if (ascii_char == 10) and (self.gprs_segments[self.active_segment][-2] == 13):
                     #self.process_crc = False
                     self.gprs_segments[self.active_segment] = self.gprs_segments[self.active_segment][:-2]
                     self.active_segment += 1
@@ -541,7 +586,7 @@ class MicropyGPRS(object):
                         valid_at_sentence = True
                         #print('len(self.gprs_segments) ={}'.format(len(self.gprs_segments)))
                     #print('0 self.gprs_segments is {}'.format(self.gprs_segments))
-                if new_char == int_from_bytes(b'>'):
+                if ascii_char == int_from_bytes(b'>'):
                     valid_at_sentence = True
 
                 # If a Valid Sentence Was received and it's a supported sentence, then parse it!!
@@ -550,8 +595,8 @@ class MicropyGPRS(object):
                     #self.clean_sentences += 1  # Increment clean sentences received
                     self.sentence_at_active = False  # Clear Active Processing Flag
                     #self.parsed_sentences += 1
-                    print('end at self.gprs_segments is {}'.format(self.gprs_segments))
-                    return self.at()
+                    #print('end at self.gprs_segments is {}'.format(self.gprs_segments))
+                    return self.parser('AT')
 
                 # Check that the sentence buffer isn't filling up with Garage waiting for the sentence to complete
                 if self.char_count > self.SENTENCE_LIMIT:
@@ -560,7 +605,7 @@ class MicropyGPRS(object):
         #print('gprs_segments is {}'.format(self.gprs_segments[0][:11]))
         
         #if self.char_count == 11 and self.gprs_segments[0][:11] == self.id:
-        if len(self.tmp_record) == 11 and self.tmp_record == self.id:
+        if len(self.tmp_record) >= 11 and self.tmp_record[-11:] == self.id:
             self.new_sentence('data')
             return None
 
@@ -574,61 +619,41 @@ class MicropyGPRS(object):
             if valid_data_sentence:
                 self.sentence_data_active = False  # Clear Active Processing Flag
                 #self.parsed_sentences += 1
-                print('end data self.gprs_segments is {}'.format(self.gprs_segments))
+                #print('end data self.gprs_segments is {}'.format(self.gprs_segments))
                 #print('self.tx_buf is        {}'.format(self.tx_buf))
-                return self.data()
+                return self.parser('data')
 
             # Check that the sentence buffer isn't filling up with Garage waiting for the sentence to complete
             if self.char_count > self.SENTENCE_LIMIT:
                 self.sentence_data_active = False
         
         #if self.char_count == 4 and self.gprs_segments[0][:4] == b'+IPD':
-        if len(self.tmp_record) == 4 and self.tmp_record == b'+IPD':
+        if len(self.tmp_record) >= 4 and self.tmp_record[-4:] == b'+IPD':
             #print('000')
             self.new_sentence('server')
             return None
         #print('gprs_segments is {}'.format(self.gprs_segments))
         if self.sentence_server_active:
             #print('self.gprs_segments is {}  {}'.format(self.char_count,self.gprs_segments))
-            if new_char == 126 and self.active_segment == 0:
+            if ascii_char == 126 and self.active_segment == 0:
                 self.gprs_segments[0] = self.gprs_segments[0][:-1]
                 self.active_segment += 1
                 self.gprs_segments.append(b'~')
                 return None
-            if new_char == 126 and self.active_segment == 1:
+            if ascii_char == 126 and self.active_segment == 1 and len(self.gprs_segments[1]) > 5:
                 self.active_segment += 1
                 self.gprs_segments.append(b'')
             if self.gprs_segments[self.active_segment] == b'\r\n':
                 valid_server_sentence = True
             if valid_server_sentence:
-                print('end server self.gprs_segments is {}'.format(self.gprs_segments))
+                #print('end server self.gprs_segments is {}'.format(self.gprs_segments))
                 self.sentence_server_active = False
                 #print('self.gprs_segments ={}'.format(self.gprs_segments))
-                return self.server()
+                return self.parser('server')
 
         # Tell Host no new sentence was parsed
         return None
 
-    def new_fix_time(self):
-        """Updates a high resolution counter with current time when fix is updated. Currently only triggered from
-        GGA, GSA and RMC sentences"""
-        try:
-            self.fix_time = pyb.millis()
-        except NameError:
-            self.fix_time = time.time()
-    def time_since_fix(self):
-        """Returns number of millisecond since the last sentence with a valid fix was parsed. Returns 0 if
-        no fix has been found"""
-        # Test if a Fix has been found
-        if self.fix_time == 0:
-            return -1
-        # Try calculating fix time assuming using millis on a pyboard; default to seconds if not
-        try:
-            current = pyb.elapsed_millis(self.fix_time)
-        except NameError:
-            current = time.time() - self.fix_time
-        return current
-    
     
 
     ########################################
@@ -651,25 +676,6 @@ class MicropyGPRS(object):
         if method1xxx(order,self.id,lss,gnss_buf,ic_id):
             self.send_dats(self.tx_buf,order)
             return 1
-    def handle_9000():
-        # self.debug_print('9000 rx_dat {}'.format(self.rx_dat))
-        for i in range(GL.N_lock):
-            #print('GL.rx_dat[i] is {}'.format(GL.rx_dat[i]))
-            if self.rx_dat[i] in [48,'0',b'0']:
-                pass
-            if self.rx_dat[i] in [49,'1',b'1']:
-                lock_gprs['open'](i)
-            if self.rx_dat[i] in [50,'2',b'2']:
-                lock_gprs['close'](i)
-            if self.rx_dat[i] in [51,'3',b'3']:
-                update_err(1)
-            if self.rx_dat[i] in [52,'4',b'4']:
-                update_err(2)
-            if self.rx_dat[i] in [53,'5',b'5']:
-                update_err(3)
-        if b'3' in self.rx_dat or b'4' in self.rx_dat or b'5' in self.rx_dat:
-            alarm(3)
-        return handle_900x(0x1001)
 
 
     # All the currently supported at sentences
@@ -702,7 +708,7 @@ class MicropyGPRS(object):
 
 
 
-    
+'''
 def test():
     test_sentence = [b'AT+CMGF=1\r\n\r\nOK\r\n',
                 b'AT+CMGR=1\r\n\r\n+CMGR: "REC READ","+8613592683720",,"2017/01/09 19:35:38+32"\r\n111111\r\n\r\nOK\r\n',
@@ -710,26 +716,28 @@ def test():
                 b'+IPD,28:~001674\xd1$\xdc\x9b\xa7-\xd4\xb93\x05(\x9c\xc1\x1d\xe2\x88\xffK\x0f\n~\r\nAT+CSQ\r\n\r\n+CSQ: 31, 99\r\n\r\nOK\r\n',
                 b'AT+CMGR=1\r\n\r\n+CMS ERROR: 321\r\n',
                 b'AT+CSQ\r\n\r\n+CSQ: 31, 99\r\n\r\nOK\r\n',
-                b'AT+CIPSEND=108,1\r\n\r\n>']
+                b'AT+CIPSEND=108,1\r\n\r\n>',
+                b'\r\nCONNECT OK\r\n+IPD,28:~001652\x97a\xd9\xf7(\x9a\x81t\xc2\x99\xb3=\xa8\x1b\xca,T\x8e\xe3y~\r\n']
     a=b=1
     my_gprs = MicropyGPRS(a,b)
     my_gprs.tx_buf = b'AP9904N0769!\x00\x00\x00\x00\x00\x00!\x00\x00\x00\x00117-01-0309:53:5813447.7089111335.64990123000122.09161111*****'
     for sentence in test_sentence:
         print('sentence is {}'.format(sentence))
         for y in sentence:
-            buf = my_gprs.update(y)
+            buf = my_gprs._update(chr(y))
             if buf:
-                print(my_gprs.ats_dict)
-                print(my_gprs.tx_buf)
+                print('my_gprs.ats_dict = {}'.format(my_gprs.ats_dict))
+                #print('my_gprs.tx_buf = {}'.format(my_gprs.tx_buf))
                 print('my_gprs.order_from_server = {}'.format(my_gprs.order_from_server))
+                print('my_gprs.rx_dat = {}'.format(my_gprs.rx_dat))
                 print()
 
 test()
-'''
+
 my_gprs = MicropyGPRS()
 sentence = b'AT+CMGR=1\r\n\r\n+CMGR: "REC READ","+8613592683720",,"2017/01/09 19:35:38+32"\r\n111111\r\n\r\nOK\r\n'
 for y in sentence:
-    buf = my_gprs.update(y)
+    buf = my_gprs._update(y)
     if buf:
         print(my_gprs.ats_dict)
         print(my_gprs.tx_buf)
