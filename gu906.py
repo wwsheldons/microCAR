@@ -981,6 +981,15 @@ class MicropyGPRS(object):
             
             GL.debug_print('gas_data = {}'.format(gas_data))
             if my_storage.modify_infos(my_storage.gifn,gas_data,mode):
+                self.method1xxx(0x1004,GL.id,str(num_of_gas),b''.join([i[:6] for i in gas_data[:num_of_gas]]))
+                self.send_dats(self.tx_buf,0x1004)
+                pyb.delay(100)
+                GL.dog.feed()
+                try:
+                    self.collect()
+                except:
+                    pass
+                '''
                 for s,info in my_storage._get_infos(my_storage.gifn,step):
                     GL.debug_print('s = {}, and info = {}'.format(s,info))
                     self.method1xxx(0x1004,GL.id,str(s),''.join([i[:6] for i in info[:s]]))
@@ -991,7 +1000,7 @@ class MicropyGPRS(object):
                         self.collect()
                     except:
                         pass
-                
+                '''
             else:
                 continue
         return 1
@@ -1037,8 +1046,8 @@ class MicropyGPRS(object):
         my_storage.modify_info(filename,GL.rx_order_dat['9007'],'add')
         n = my_storage.get_rows(filename)
         # emergency card only can write one each time
-        info = my_storage.get_info(filename,n)
-        #print('info = {}'.format(info))
+        info = my_storage.get_info(filename,n-1)
+        print('info = {}'.format(info))
         self.method1xxx(0x1007,GL.id,info.decode())
         if self.send_dats(self.tx_buf,0x1007):
             try:
