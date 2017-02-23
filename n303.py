@@ -1,15 +1,31 @@
 #modify by wjy @20170106
 from math import floor
-
+import GL
 # Import pyb or time for fix time handling
 try:
     # Assume running on pyboard
     import pyb
+    GNSS_PORT = pyb.UART(2,9600,timeout=10,read_buf_len=64)
+    gnss_reset_pin = pyb.Pin(pyb.Pin.cpu.B4, pyb.Pin.OUT_PP)
+    battery_voltage = pyb.ADC(pyb.Pin.cpu.B1)
+    vcc_voltage = pyb.ADC(pyb.Pin.cpu.B0)
+    control_cover = pyb.ADC(pyb.Pin.cpu.A5)
+    PINS = (gnss_reset_pin,battery_voltage,vcc_voltage,control_cover)
+    
 except ImportError:
     # Otherwise default to time module for non-embedded implementations
     # Note that this forces the resolution of the fix time 1 second instead
     # of milliseconds as on the pyboard
     import time
+    GNSS_PORT = ''
+    PINS = (1,2,3,4)
+
+
+
+
+
+
+
 
 def int2bcd(a):
     '''int to bcd code'''
@@ -32,16 +48,27 @@ class MicropyGNSS(object):
     __HEMISPHERES = {'N':b'1', 'S':b'2', 'E':b'1', 'W':b'2'}
     #__FIELD_LENGTH = (1,8,8,1,9,1,10,4,3,6,2,1,1,1,1,1,1,1,1,1) #the length of each field 
     
-    def __init__(self, gnss_port,pins,local_offset=0):
+    def __init__(self, local_offset=0):
         '''
         Setup GPS Object Status Flags, Internal Data Registers, etc
         '''
-        self.gnss_port = gnss_port
-        self.gnss_reset = pins[0]
+        
+        GL.g = 0
+
+        GL.vcc_below_14V = False
+        GL.locks_on_checks_vcc19V = False
+        GL.locks_off = False
+        # Position/Motion
+        #GL.speed_kmh = 0
+        #GL.latitude = 0.0
+        #GL.longitude = 0.0
+        ######################
+        self.gnss_port = GNSS_PORT
+        self.gnss_reset = PINS[0]
         self.gnss_reset.low()
-        self.battery_voltage = pins[1]
-        self.vcc_voltage = pins[2]
-        self.control_cover = pins[3]
+        self.battery_voltage = PINS[1]
+        self.vcc_voltage = PINS[2]
+        self.control_cover = PINS[3]
         #####################
         # Object Status Flags
         self.sentence_active = False
@@ -67,10 +94,7 @@ class MicropyGNSS(object):
         # Data From Sentences
         self.local_offset = local_offset
 
-        # Position/Motion
-        self.speed_kmh = 0
-        self.latitude = 0.0
-        self.longitude = 0.0
+        
         
         self.course = ''
         self.altitude = ''
@@ -94,87 +118,40 @@ class MicropyGNSS(object):
         self.update_gnrmc = False
         self.update_gngga = False
 
-        # flag bit for other thread
-        self.vcc_below_14V = False
-        self.vcc_over_19V = False
-        self.battery_below_10V = False
-
-
         # clear buf
         self.clear_buf()
+        GL.debug_print('gnss init is finished...')
 
     def clear_buf(self):
         try:
-            self.gnss_buf = bytearray('216-06-0320:08:0023447.9072111335.68360123000000.00001111*****', 'utf-8')
+            GL.gnss_buf = bytearray('216-06-0320:08:0023447.9072111335.68360123000000.00001111*****', 'utf-8')
         except:
-            self.gnss_buf = bytearray('216-06-0320:08:0023447.9072111335.68360123000000.00001111*****')
+            GL.gnss_buf = bytearray('216-06-0320:08:0023447.9072111335.68360123000000.00001111*****')
         '''
         #length of gnss_buf is 62
-        self.gnss_buf = ['0']*20
-        self.gnss_buf[0] = '2' # 2-invalid 1-valid
-        self.gnss_buf[1] = '16-06-03' # date
-        self.gnss_buf[2] = '20:08:00' # time
-        self.gnss_buf[3] = '2' # 1--S 2--N
-        self.gnss_buf[4] = '3447.9072' # Latitude
-        self.gnss_buf[5] = '1' # 1-E 2-W
-        self.gnss_buf[6] = '11335.6836' # Longitude
-        self.gnss_buf[7] = '0123' # altitude
-        self.gnss_buf[8] = '000' # speed Km/h
-        self.gnss_buf[9] = '000.00' # course
-        self.gnss_buf[10] = '00' # num of satellite
-        self.gnss_buf[11] = '1' # runtime data-1 not runtime data-2
-        self.gnss_buf[12] = '1' # control_cover 1- close 2-open
-        self.gnss_buf[13] = '1' # lock power 0-power off 1-power on
-        self.gnss_buf[14] = '1' # main power 0-power off 1-power on
-        self.gnss_buf[15] = '*' # reserve 1
-        self.gnss_buf[16] = '*' # reserve 2
-        self.gnss_buf[17] = '*' # reserve 3
-        self.gnss_buf[18] = '*' # reserve 4
-        self.gnss_buf[19] = '*' # reserve 5
+        GL.gnss_buf = ['0']*20
+        GL.gnss_buf[0] = '2' # 2-invalid 1-valid
+        GL.gnss_buf[1] = '16-06-03' # date
+        GL.gnss_buf[2] = '20:08:00' # time
+        GL.gnss_buf[3] = '2' # 1--S 2--N
+        GL.gnss_buf[4] = '3447.9072' # Latitude
+        GL.gnss_buf[5] = '1' # 1-E 2-W
+        GL.gnss_buf[6] = '11335.6836' # Longitude
+        GL.gnss_buf[7] = '0123' # altitude
+        GL.gnss_buf[8] = '000' # speed Km/h
+        GL.gnss_buf[9] = '000.00' # course
+        GL.gnss_buf[10] = '00' # num of satellite
+        GL.gnss_buf[11] = '1' # runtime data-1 not runtime data-2
+        GL.gnss_buf[12] = '1' # control_cover 1- close 2-open
+        GL.gnss_buf[13] = '1' # lock power 0-power off 1-power on
+        GL.gnss_buf[14] = '1' # main power 0-power off 1-power on
+        GL.gnss_buf[15] = '*' # reserve 1
+        GL.gnss_buf[16] = '*' # reserve 2
+        GL.gnss_buf[17] = '*' # reserve 3
+        GL.gnss_buf[18] = '*' # reserve 4
+        GL.gnss_buf[19] = '*' # reserve 5
         '''
         
-    ########################################
-    # Logging Related Functions
-    ########################################
-    def start_logging(self, target_file, mode="append"):
-        """
-        Create GPS data log object
-        """
-        if mode == 'new':
-            mode_code = 'w'
-        else:
-            mode_code = 'a'
-        try:
-            self.log_handle = open(target_file, mode_code)
-        except AttributeError:
-            print("Invalid FileName")
-            return False
-
-        self.log_en = True
-        return True
-
-    def stop_logging(self):
-        """
-        Closes the log file handler and disables further logging
-        """
-        try:
-            self.log_handle.close()
-        except AttributeError:
-            print("Invalid Handle")
-            return False
-
-        self.log_en = False
-        return True
-
-    def write_log(self, log_string):
-        """Attempts to write the last valid NMEA sentence character to the active file handler
-        """
-        try:
-            self.log_handle.write(log_string)
-        except TypeError:
-            return False
-        return True
-
     ########################################
     # Sentence Parsers
     ########################################
@@ -192,7 +169,7 @@ class MicropyGNSS(object):
                 hours = int(utc_string[0:2]) + self.local_offset
                 minutes = int(utc_string[2:4])
                 seconds = float(utc_string[4:])
-                self.gnss_buf[9:17] = (utc_string[0:2]+':'+utc_string[2:4]+':'+utc_string[4:6]).encode()
+                GL.gnss_buf[9:17] = (utc_string[0:2]+':'+utc_string[2:4]+':'+utc_string[4:6]).encode()
                 
             '''
             else:
@@ -203,13 +180,13 @@ class MicropyGNSS(object):
                 '''
             # Number of Satellites in Use
             satellites_in_use = int(self.gps_segments[7])
-            self.gnss_buf[51:53] = self.gps_segments[7].encode()
+            GL.gnss_buf[51:53] = self.gps_segments[7].encode()
             # Horizontal Dilution of Precision
             hdop = float(self.gps_segments[8])
 
             # Get Fix Status
             fix_stat = int(self.gps_segments[6])
-            #self.gnss_buf[0:1] = self.gps_segments[6].encode()
+            #GL.gnss_buf[0:1] = self.gps_segments[6].encode()
             
         except ValueError:
             return False
@@ -217,24 +194,27 @@ class MicropyGNSS(object):
         # Process Location and Speed Data if Fix is GOOD
         if fix_stat:
             # Longitude / Latitude
-            self.gnss_buf[0:1] = b'1'
+            GL.gnss_buf[0:1] = b'1'
+            if not GL.g:
+                GL.g = 1
+                GL.lcd_update(0)
             try:
                 # Latitude
                 l_string = self.gps_segments[2]
                 lat_degs = int(l_string[0:2])
                 lat_mins = float(l_string[2:])
                 lat_hemi = self.gps_segments[3]
-                self.gnss_buf[18:27] = '{:0>09}'.format(self.gps_segments[2][:9]).encode()
-                self.gnss_buf[27:28] = self.__HEMISPHERES[lat_hemi]
-                self.latitude = float(bytes(self.gnss_buf[18:27]).decode())
+                GL.gnss_buf[18:27] = '{:0>09}'.format(self.gps_segments[2][:9]).encode()
+                GL.gnss_buf[27:28] = self.__HEMISPHERES[lat_hemi]
+                #GL.latitude = float(bytes(GL.gnss_buf[18:27]).decode())
                 # Longitude
                 l_string = self.gps_segments[4]
                 lon_degs = int(l_string[0:3])
                 lon_mins = float(l_string[3:])
                 lon_hemi = self.gps_segments[5]
-                self.gnss_buf[28:38] = '{:0>010}'.format(self.gps_segments[4][:10]).encode()
-                self.longitude = float(bytes(self.gnss_buf[28:38]).decode())
-                self.gnss_buf[27:28] = self.__HEMISPHERES[lon_hemi]
+                GL.gnss_buf[28:38] = '{:0>010}'.format(self.gps_segments[4][:10]).encode()
+                #GL.longitude = float(bytes(GL.gnss_buf[28:38]).decode())
+                GL.gnss_buf[27:28] = self.__HEMISPHERES[lon_hemi]
             except ValueError:
                 return False
 
@@ -247,7 +227,7 @@ class MicropyGNSS(object):
             # Altitude / Height Above Geoid
             try:
                 altitude = float(self.gps_segments[9])
-                self.gnss_buf[38:42] = ('{:0>4}'.format(int(altitude))).encode()
+                GL.gnss_buf[38:42] = ('{:0>4}'.format(int(altitude))).encode()
                 geoid_height = float(self.gps_segments[11])
             except ValueError:
                 return False
@@ -260,7 +240,10 @@ class MicropyGNSS(object):
             self.geoid_height = geoid_height
             '''
         else:
-            self.gnss_buf[0:1] = b'2'
+            GL.gnss_buf[0:1] = b'2'
+            if GL.g:
+                GL.g = 0
+                GL.lcd_update(0)
         # Update Object Data
         '''
         self.timestamp = (hours, minutes, seconds)
@@ -289,7 +272,7 @@ class MicropyGNSS(object):
                 minutes = int(utc_string[2:4])
                 seconds = float(utc_string[4:])
                 self.timestamp = (hours, minutes, seconds)
-                self.gnss_buf[9:17] = (utc_string[0:2]+':'+utc_string[2:4]+':'+utc_string[4:6]).encode()
+                GL.gnss_buf[9:17] = (utc_string[0:2]+':'+utc_string[2:4]+':'+utc_string[4:6]).encode()
             else:  # No Time stamp yet
                 self.timestamp = (0, 0, 0)
 
@@ -307,7 +290,7 @@ class MicropyGNSS(object):
                 month = int(date_string[2:4])
                 year = int(date_string[4:6])
                 self.date = (day, month, year)
-                self.gnss_buf[1:9] = (date_string[4:6]+'-'+date_string[2:4]+'-'+date_string[0:2]).encode()
+                GL.gnss_buf[1:9] = (date_string[4:6]+'-'+date_string[2:4]+'-'+date_string[0:2]).encode()
             '''
             else:  # No Date stamp yet
                 self.date = (0, 0, 0)
@@ -317,7 +300,11 @@ class MicropyGNSS(object):
 
         # Check Receiver Data Valid Flag
         if self.gps_segments[2] == 'A':  # Data from Receiver is Valid/Has Fix
-            self.gnss_buf[0:1] = b'1'
+            GL.gnss_buf[0:1] = b'1'
+            if not GL.g:
+                GL.g = 1
+                GL.lcd_update(0)
+            
             # Longitude / Latitude
             try:
                 # Latitude
@@ -325,18 +312,18 @@ class MicropyGNSS(object):
                 lat_degs = int(l_string[0:2])
                 lat_mins = float(l_string[2:])
                 lat_hemi = self.gps_segments[4]
-                self.gnss_buf[17:18] = self.__HEMISPHERES[lat_hemi]
-                self.gnss_buf[18:27] = '{:>09}'.format(self.gps_segments[3][:9]).encode()
-                #print(self.gnss_buf[18:27])
-                self.latitude = float(bytes(self.gnss_buf[18:27]).decode())
+                GL.gnss_buf[17:18] = self.__HEMISPHERES[lat_hemi]
+                GL.gnss_buf[18:27] = '{:>09}'.format(self.gps_segments[3][:9]).encode()
+                #print(GL.gnss_buf[18:27])
+                #GL.latitude = float(bytes(GL.gnss_buf[18:27]).decode())
                 # Longitude
                 l_string = self.gps_segments[5]
                 lon_degs = int(l_string[0:3])
                 lon_mins = float(l_string[3:])
                 lon_hemi = self.gps_segments[6]
-                self.gnss_buf[27:28] = self.__HEMISPHERES[lon_hemi]
-                self.gnss_buf[28:38] = '{:>010}'.format(self.gps_segments[5][:10]).encode()
-                self.longitude = float(bytes(self.gnss_buf[28:38]).decode())
+                GL.gnss_buf[27:28] = self.__HEMISPHERES[lon_hemi]
+                GL.gnss_buf[28:38] = '{:>010}'.format(self.gps_segments[5][:10]).encode()
+                #GL.longitude = float(bytes(GL.gnss_buf[28:38]).decode())
             except ValueError:
                 return False
 
@@ -367,11 +354,11 @@ class MicropyGNSS(object):
             '''
             # Include mph and hm/h
             #self.speed_kmh = (spd_knt, spd_knt * 1.151, spd_knt * 1.852)
-            self.speed_kmh = spd_knt * 1.852
-            self.gnss_buf[42:45] = ('{:>03}'.format(int(self.speed_kmh))).encode()
+            #GL.speed_kmh = spd_knt * 1.852
+            GL.gnss_buf[42:45] = ('{:>03}'.format(int(spd_knt * 1.852))).encode()
 
             self.course = course
-            self.gnss_buf[45:51] = ('%06.2f'%course).encode()
+            GL.gnss_buf[45:51] = ('%06.2f'%course).encode()
 
             self.valid = True
 
@@ -380,8 +367,11 @@ class MicropyGNSS(object):
 
         else:  # Clear Position Data if Sentence is 'Invalid'
 
-            self.gnss_buf[0:1] = b'2'
-
+            GL.gnss_buf[0:1] = b'2'
+            if GL.g:
+                GL.g = 0
+                GL.lcd_update(0)
+            
             '''
             self.latitude = (0, 0.0, 'N')
             self.longitude = (0, 0.0, 'W')
@@ -398,35 +388,43 @@ class MicropyGNSS(object):
     # Data Stream Handler Functions
     ##########################################
     def update_voltage(self):
-        if self.control_cover.read() > 3900:
-            self.gnss_buf[54:55] = b'2'
-        if self.control_cover.read() < 300:
-            self.gnss_buf[54:55] = b'1'
-        if self.vcc_voltage.read() < 1699: #14V
-            #bat_en.value(1)
-            self.gnss_buf[56:57] = b'0'
-            self.vcc_below_14V = True
-            #lock_gnss['lp_off']()
-            #gprs.send_1003()
-        else:
-            self.gnss_buf[56:57] = b'1'
-        
-        if self.vcc_voltage.read() > 2243: #19V
-            self.gnss_buf[56:57] = b'1'
-            if self.gnss_buf[56:57] == b'0':
-                self.vcc_over_19V = True
-                #lock_gnss['lp_ons']()
-                #self.lock_status = [1]*12
-                #lock_gnss['checks']()
-        else:
-            self.gnss_buf[56:57] == b'0'
-        if self.battery_voltage.read() < 1216: #10V
-            self.gnss_buf[55:56] = b'0'
-            if self.gnss_buf[56:57] == b'0':
-                #lock_gnss['lp_offs']()
-                self.battery_below_10V = True
-        if self.battery_voltage.read() > 1316:
-            self.gnss_buf[55:56] = b'1'
+        try:
+            #GL.debug_print('update_voltage is begining..')
+            if self.control_cover.read() > 3900:
+                GL.gnss_buf[54:55] = b'2'
+            if self.control_cover.read() < 300:
+                GL.gnss_buf[54:55] = b'1'
+            if self.vcc_voltage.read() < 1699: #14V
+                #bat_en.value(1)
+                GL.gnss_buf[56:57] = b'0'
+                GL.vcc_below_14V = True
+                #lock_gnss['lp_off']()
+                #gprs.send_1003()
+            else:
+                GL.gnss_buf[56:57] = b'1'
+            
+            if self.vcc_voltage.read() > 2243: #19V
+                GL.gnss_buf[56:57] = b'1'
+                if GL.gnss_buf[56:57] == b'0':
+                    GL.locks_on_checks_vcc19V = True
+                    #lock_gnss['lp_ons']()
+                    GL.lock_status = [1]*12
+                    #lock_gnss['checks']()
+            else:
+                GL.gnss_buf[56:57] == b'0'
+            
+            if self.battery_voltage.read() < 1216: #10V
+                GL.gnss_buf[55:56] = b'0'
+                if GL.gnss_buf[56:57] == b'0':
+                    #lock_gnss['lp_offs']()
+                    GL.locks_off = True
+            if self.battery_voltage.read() > 1316:
+                GL.gnss_buf[55:56] = b'1'
+            GL.debug_print('battery_voltage = {}'.format(self.battery_voltage.read()))
+            GL.debug_print('vcc_voltage = {}'.format(self.vcc_voltage.read()))
+            GL.debug_print('control_cover = {}'.format(self.control_cover.read()))
+        except:
+            pass
     def new_sentence(self):
         """Adjust Object Flags in Preparation for a New Sentence"""
         self.gps_segments = ['']
@@ -435,24 +433,50 @@ class MicropyGNSS(object):
         self.sentence_active = True
         self.process_crc = True
         self.char_count = 0
+    def update(self,my_storage = 0):
 
-    def update(self, new_char = 0):
-        """Process a new input char and updates GPS object if necessary based on special characters ('$', ',', '*')
-        Function builds a list of received string that are validate by CRC prior to parsing by the  appropriate
-        sentence function. Returns sentence type on successful parse, None otherwise"""
-
-        valid_sentence = False
         try:
             if self.gnss_reset.value() == 1:
                 print('N303 is Invalid, Please make the gnss_reset low')
                 return None
+            
             tmp = self.gnss_port.readchar()
             if tmp < 0 :
                 #print('N303 is Invalid')
                 return None
-            new_char = chr(tmp)
+            if self._update(chr(tmp)):
+                try:
+                    if not GL.m:
+                        pos = bytearray(GL.lock_status)+GL.gnss_buf
+                        pos[53+12] = 50
+                        n = my_storage.get_rows(my_storage.posfn)
+                        # int(bytes(GL.gnss_buf[42:45]).decode()) ---speed
+                        if n and my_storage.get_info(my_storage.posfn,n) != bytes(pos).decode() and int(bytes(GL.gnss_buf[42:45]).decode()) > 1:
+                            my_storage.modify_info(my_storage.posfn,pos,'add')
+                            print('save {}th offline pos record'.format(n+1))
+                except:
+                    print('storage offline pos record failed')
+                return 1
+            else:
+                return 0
+            '''
+            if self.gnss_port.any() > 1:
+                for i in range(self.gnss_port.readline()):
+                    if self._update(chr(i)):
+                        return 1
+            return None
+            '''
         except:
-            pass
+            return None
+        
+        
+    def _update(self, new_char = 0):
+        """Process a new input char and updates GPS object if necessary based on special characters ('$', ',', '*')
+        Function builds a list of received string that are validate by CRC prior to parsing by the  appropriate
+        sentence function. Returns sentence type on successful parse, None otherwise"""
+        #GL.debug_print('GL.gnss_buf = {}'.format(GL.gnss_buf))
+        valid_sentence = False
+        
         # Validate new_char is a printable char
         ascii_char = ord(new_char)
 
@@ -519,8 +543,9 @@ class MicropyGNSS(object):
                             #return self.gps_segments[0]
                             if self.update_gnrmc and self.update_gngga:
                                 self.update_gnrmc = self.update_gngga = False
-                                #return self.gnss_buf
+                                #return GL.gnss_buf
                                 self.update_voltage()
+                                GL.gnss_buf[57:58] = (int2bcd(GL.rssi)).to_bytes(1, 'little')
                                 return 1
                 # Check that the sentence buffer isn't filling up with Garage waiting for the sentence to complete
                 if self.char_count > self.SENTENCE_LIMIT:
@@ -555,18 +580,14 @@ class MicropyGNSS(object):
     # All the currently supported NMEA sentences
     supported_sentences = {'GNRMC': gnrmc, 'GNGGA': gngga,'GPRMC':gnrmc, 'GPGGA':gngga}
     # supported_sentences_ = {'GNRMC': gnrmc, 'GNGGA': gngga, 'GNVTG': gnvtg, 'GNGSA': gngsa, 'GNGSV': gngsv,'GNGLL': gngll}
+    '''
     @property
     def speed(self):
         return self.speed_kmh
     @property
     def get_pos(self):
         return (self.latitude,self.longitude)
-    @property
-    def g(self):
-        if self.gnss_buf[0:1] == b'1':
-            return 1
-        else:
-            return 0
+    '''
 
 def test():
     test_sentence = [b'$GPRMC,081836,A,3751.65,S,14507.36,E,000.0,360.0,130998,011.3,E*62\n',
@@ -581,7 +602,7 @@ def test():
             buf = my_gps.update(chr(y))
             if buf:
                 print(my_gps.gnss_buf)
-        print('my_gps.latitude,my_gps.longitude = {},{}'.format(my_gps.latitude,my_gps.longitude))
-        print('my_gps.speed_kmh= {}'.format(my_gps.speed_kmh))
+        print('GL.latitude,GL.longitude = {},{}'.format(float(bytes(GL.gnss_buf[18:27]).decode()),float(bytes(GL.gnss_buf[28:38]).decode())))
+        print('GL.speed_kmh= {}'.format(GL.speed_kmh))
 
 #test()

@@ -1,5 +1,5 @@
-from dd import get_key
-from box import get_box
+from dd import get_key,get_box
+
 nb = 4  # number of coloumn of State (for AES = 4)
 nr = 10  # number of rounds ib ciper cycle (if nb = 4 nr = 10)
 nk = 4  # the key length (in 32-bit words)
@@ -39,7 +39,7 @@ def key_expansion(key):
     tmp = []
     
     for i in range(4):
-        tmp.append(bytes(key_schedule[i]))
+        tmp.append(key_schedule[i])
     #return bytearray(key_schedule)
     return tmp
 

@@ -1,9 +1,8 @@
-from box import get_box
+from dd import get_box
 nb = 4  # number of coloumn of State (for AES = 4)
 nr = 10  # number of rounds ib ciper cycle (if nb = 4 nr = 10)
 nk = 4  # the key length (in 32-bit words)
 
-hex_symbols_to_int = {'a': 10, 'b': 11, 'c': 12, 'd': 13, 'e': 14, 'f': 15}
 
 
 
@@ -38,7 +37,7 @@ def _encrypt(input_bytes, key):
         for c in range(nb):
             output[r + 4 * c] = state[r][c]
 
-    return output
+    return bytes(output)
 
 
 def _decrypt(cipher, key):
@@ -69,7 +68,7 @@ def _decrypt(cipher, key):
         for c in range(nb):
             output[r + 4 * c] = state[r][c]
 
-    return output
+    return bytes(output)
 
 
 def sub_bytes(state, inv=False):
@@ -230,7 +229,7 @@ def encrypt(input_bytes, key):
         input_bytes = [i for i in input_bytes]
     '''
     n,nod = divmod(len(input_bytes),16)
-    output = []
+    output = bytes()
     orig_len = len(input_bytes)
     if nod != 0:
         #input_bytes = input_bytes+[0]*(16-nod)
@@ -238,7 +237,8 @@ def encrypt(input_bytes, key):
         n = n+1    
     for i in range(n):
         tmp = input_bytes[i*16:i*16+16]
-        output.extend(_encrypt(tmp, key))
+        #output.extend(_encrypt(tmp, key))
+        output += _encrypt(tmp, key)
     #return output,orig_len
     return output
 
@@ -247,7 +247,8 @@ def decrypt(cipher, key,orig_len=0):
     output = []
     for i in range(n):
         tmp = cipher[i*16:i*16+16]
-        output.extend(_decrypt(tmp, key))
+        #output.extend(_decrypt(tmp, key))
+        output += _decrypt(tmp, key)
     if orig_len == 0:
         return output
     else:

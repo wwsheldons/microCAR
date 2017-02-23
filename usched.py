@@ -7,7 +7,7 @@
 # V1.05 Uses utime for improved portability.
 # Copyright Peter Hinch 2016 Released under the MIT license
 
-import gc
+import gc,GL
 from utime import ticks_us
 #from sys import platform
 try:
@@ -254,7 +254,9 @@ class Sched(object):
 
 # Runs once then in roundrobin or when there's nothing else to do
     def _idle_thread(self):
+        GL.dog.feed()
         if self.gc_enable and (self.last_gc == 0 or after(self.last_gc) > GCTIME):
+            
             gc.collect()
             #gc.threshold(gc.mem_free() // 4 + gc.mem_alloc())
             self.last_gc = ticks_us()
@@ -286,6 +288,7 @@ class Sched(object):
     def _runthread(self, thread, priority):
         try:                                    # Run thread, send (interrupt count, poll func value, uS overdue)
             thread[YIELDED] = thread[FUNC].send(priority)  # Store object yielded by thread
+            GL.dog.feed()
         except StopIteration:                   # The thread has terminated:
             thread[STATE] = DEAD                # Flag thread for removal
 
@@ -304,6 +307,7 @@ class Sched(object):
                     if p_run is None or priority > p_run:
                         p_run = priority
                         thr_run = thread
+        GL.dog.feed()
         return thr_run, p_run
 
     def _runthreads(self):
@@ -313,7 +317,7 @@ class Sched(object):
                 return
             self._runthread(thr_run, p_run)
             thr_run[DUE] = False                # Only care if RR
-
+            GL.dog.feed()
     def run(self):                              # Returns if the stop method is used or all threads terminate
         try:
             while not self.bStop:
@@ -325,6 +329,7 @@ class Sched(object):
                 for thread in self.lstThread:
                     thread[DUE] = True              # Applies only to roundrobin
                 self._runthreads()                  # Returns when all RR threads have run once
+                GL.dog.feed()
         # Tidy up before scheduler exit
         finally:
             for gen in [thread[FUNC] for thread in self.lstThread if thread[STATE] != DEAD]:
