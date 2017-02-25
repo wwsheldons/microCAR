@@ -19,6 +19,7 @@ class MicropyRFID(object):
             #print('card data is {}'.format(tmp))
             GL.ic_id = ''.join( [ '{:02X}'.format(x) for x in tmp[7:11] ] ).strip()
             self.rfid_init()
+            
             return 1
         return None
     

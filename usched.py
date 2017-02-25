@@ -63,6 +63,7 @@ class Waitfor(object):
         self.roundrobin = False                 # If true reschedule ASAP
 
     def triggered(self):                        # Polled by scheduler. Returns a priority tuple or None if not ready
+        GL.dog.feed()
         if self.irq:                            # Waiting on an interrupt
             self.irq.disable()                  # Potential concurrency issue here (????)
             numints = self.interruptcount       # Number of missed interrupts
@@ -73,6 +74,7 @@ class Waitfor(object):
                 return (numints, 0, 0)
         if self.pollfunc:                       # Optional function for the scheduler to poll
             res = self.pollfunc(*self.pollfunc_args) # something other than an interrupt
+            GL.dog.feed()
             if res is not None:
                 return (0, res, 0)
         if not self.forever:                    # Check for timeout
@@ -255,22 +257,22 @@ class Sched(object):
 # Runs once then in roundrobin or when there's nothing else to do
     def _idle_thread(self):
         GL.dog.feed()
+        #GL.debug_print('_idle_thread is running...')
         if self.gc_enable and (self.last_gc == 0 or after(self.last_gc) > GCTIME):
             
             gc.collect()
             #gc.threshold(gc.mem_free() // 4 + gc.mem_alloc())
             self.last_gc = ticks_us()
+        '''
         if self.heartbeat is not None and (self.last_heartbeat == 0 or after(self.last_heartbeat) > HBTIME):
             self.heartbeat.toggle()
-            '''
+            
             if platform == 'pyboard':
                 self.heartbeat.toggle()
             elif platform == 'esp8266':
                 self.heartbeat(not self.heartbeat())
-            '''
-
             self.last_heartbeat = ticks_us()
-
+        '''
     def triggered(self, thread):
         wf = thread[YIELDED]
         if wf is None:
@@ -328,6 +330,7 @@ class Sched(object):
                     return
                 for thread in self.lstThread:
                     thread[DUE] = True              # Applies only to roundrobin
+                    GL.dog.feed()
                 self._runthreads()                  # Returns when all RR threads have run once
                 GL.dog.feed()
         # Tidy up before scheduler exit

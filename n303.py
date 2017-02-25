@@ -239,6 +239,7 @@ class MicropyGNSS(object):
             self.altitude = altitude
             self.geoid_height = geoid_height
             '''
+            self.update_gngga = True
         else:
             GL.gnss_buf[0:1] = b'2'
             if GL.g:
@@ -256,7 +257,7 @@ class MicropyGNSS(object):
         # If Fix is GOOD, update fix timestamp
         if fix_stat:
             self.new_fix_time()
-        self.update_gngga = True
+        
         return True
 
     def gnrmc(self):
@@ -361,7 +362,7 @@ class MicropyGNSS(object):
             GL.gnss_buf[45:51] = ('%06.2f'%course).encode()
 
             self.valid = True
-
+            self.update_gnrmc = True
             # Update Last Fix Time
             self.new_fix_time()
 
@@ -380,7 +381,7 @@ class MicropyGNSS(object):
             self.date = (0, 0, 0)
             '''
             self.valid = False
-        self.update_gnrmc = True
+            
         return True
 
 
@@ -433,8 +434,7 @@ class MicropyGNSS(object):
         self.sentence_active = True
         self.process_crc = True
         self.char_count = 0
-    def update(self,my_storage = 0):
-
+    def update(self):
         try:
             if self.gnss_reset.value() == 1:
                 print('N303 is Invalid, Please make the gnss_reset low')
@@ -445,17 +445,6 @@ class MicropyGNSS(object):
                 #print('N303 is Invalid')
                 return None
             if self._update(chr(tmp)):
-                try:
-                    if not GL.m:
-                        pos = bytearray(GL.lock_status)+GL.gnss_buf
-                        pos[53+12] = 50
-                        n = my_storage.get_rows(my_storage.posfn)
-                        # int(bytes(GL.gnss_buf[42:45]).decode()) ---speed
-                        if n and my_storage.get_info(my_storage.posfn,n) != bytes(pos).decode() and int(bytes(GL.gnss_buf[42:45]).decode()) > 1:
-                            my_storage.modify_info(my_storage.posfn,pos,'add')
-                            print('save {}th offline pos record'.format(n+1))
-                except:
-                    print('storage offline pos record failed')
                 return 1
             else:
                 return 0

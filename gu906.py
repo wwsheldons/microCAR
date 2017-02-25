@@ -79,7 +79,7 @@ class MicropyGPRS(object):
     # Max Number of Characters a valid sentence can be (based on module limited)
     SENTENCE_LIMIT = 1000
     
-    def __init__(self ,collect=0):
+    def __init__(self):
         '''
         Setup GPRS Object Status Flags, Internal Data Registers, etc
         '''
@@ -97,10 +97,6 @@ class MicropyGPRS(object):
         GL.ERROR[4]  --- # reserve
         '''
         GL.ERROR = [0]*5
-        
-        if collect:
-        	self.collect = collect
-        
         
         #####################
         # Object Status Flags
@@ -152,36 +148,38 @@ class MicropyGPRS(object):
     ########################################
     # opreate the gprs module
     ########################################
-    def send_at(self,order,timeout = 500):
+    def send_at(self,order,timeout = 3000):
         # GL.debug_print('send order is {}'.format(order))
         if self.hw_port.write('{}\r\n'.format(order)) == len(order)+2:
             self.ats_dict[order] = 0
             start_1 = time.ticks_ms()
             while True:
+                GL.dog.feed()
                 #print('9999999999')
                 # print('time.ticks_diff(start_1, time.ticks_ms()) is {}'.format(time.ticks_diff(start_1, time.ticks_ms())))
                 if time.ticks_diff(start_1, time.ticks_ms()) >= timeout:
                     return 0
                 if self.update():
-                    GL.dog.feed()
+                    
                     return 1
         return 0
-    def send_d(self,d,timeout = 500):
+    def send_d(self,d,timeout = 5000):
         
         if not isinstance(d,bytearray):
             self.hw_port.write(bytearray(d))
             start_2 = time.ticks_ms()
             while True:
+                GL.dog.feed()
                 #print('888888888888')
                 if time.ticks_diff(start_2, time.ticks_ms()) >= timeout:
                     return 0
                 if self.update():
-
                     return 1
         if d == 0x1a:
             self.hw_port.writechar(0x1a)
             start_3 = time.ticks_ms()
             while True:
+                GL.dog.feed()
                 #print('7777777777777')
                 if time.ticks_diff(start_3, time.ticks_ms()) >= timeout:
                     return 0
@@ -199,6 +197,7 @@ class MicropyGPRS(object):
         '''
         order = 'AT+CIPSEND={},1'.format(len(d))
         self.send_at(order)
+        pyb.delay(20)
         # GL.debug_print('the dat will be send is{}'.format(d))
         self.send_d(d)
         #send_at('AT+CIPSEND={}'.format(len(d)))#bin type
@@ -217,6 +216,7 @@ class MicropyGPRS(object):
         #sleep_us(400)
         self.send_d(0x1a)# send
         #sleep_us(400)
+        pyb.delay(100)
         self.del_sms()
         #sleep_us(400)
         return 1
@@ -273,15 +273,21 @@ class MicropyGPRS(object):
             ind_ip_end = context[ind_ip+1:].index('#')
             GL.ip = context[ind_ip+3:ind_ip_end+ind_ip+1]
             #storage_gprs['m_ip'](ip)
+            #GL.storage.modify_info(GL.storage.ipfn,GL.ip)
             ind_port = context.index('port:')
-            GL.port = context[ind_port+5:ind_port+9]
+            GL.port = int(context[ind_port+5:ind_port+9],10)
+            
+            #GL.storage.modify_info(GL.storage.portfn,str(GL.port))
+
             #storage_gprs['m_port'](port)
             ind_id = context.index('id:')
             GL.id = context[ind_id+3:ind_id+14]
+            #GL.storage.modify_info(GL.storage.idfn,GL.id)
             #storage_gprs['m_id'](id)
             self.send_sms(num,'ip port and id set OK')
             #storage_gprs['m_using_times']()
             self.recv_set_sms = 1
+            
         if 'admin phone' in context:
             ind = context.index(':')
             ph1 = context[ind+1:ind+12]
@@ -374,10 +380,8 @@ class MicropyGPRS(object):
                     print ('crc32 error')
                 length_frame = tmp_len_dat
                 key = tmp_key
-                try:
-                    self.collect()
-                except:
-                    pass
+                #GL.collect()
+                
 
                 #print('tmp_dat ={}'.format(tmp_dat))
                 if (opt & 0x01):
@@ -386,10 +390,9 @@ class MicropyGPRS(object):
 
                 else:
                     d = tmp_dat
-                try:
-                    self.collect()
-                except:
-                    pass
+                
+                    #GL.collect()
+                
                 
                 '''
                 print('d ={}'.format(d))
@@ -430,7 +433,6 @@ class MicropyGPRS(object):
                     if order in ['9000','9010','9007','9008','9009']:
                         len_of_frame = self.supported_order[order][0]-11
                         if order == '9010':
-                            
                             GL.report_tick = int(d[start:len_of_frame+start].decode())
                             GL.debug_print('GL.report_tick = {}'.format(GL.report_tick))
                             self.method1xxx(0x1010,GL.id,'{:0>4}'.format(GL.report_tick))
@@ -452,10 +454,9 @@ class MicropyGPRS(object):
                     GL.rx_order_dat[order] = d[start:len_of_frame+start]
                     GL.debug_print('mmmmmmmmmmmmmmmmmmmmmmmmmmm')
                     GL.debug_print('order_from_server = {} and rx_dat = {}'.format(order,GL.rx_order_dat[order]))
-                try:
-                    self.collect()
-                except:
-                    pass
+                
+                #GL.collect()
+                
                 GL.dog.feed()
                 return 1
                 #return self.supported_order[order][1](self)
@@ -536,28 +537,28 @@ class MicropyGPRS(object):
                 else:
                     if not GL.ERROR[3]:
                         GL.ERROR[3] = 1
-                        GL.lcd_update(9,1)
-            if b'AT+CIPSTART' in at_order:
-                if b'+CME ERROR: 15' in module_reply:
-                    if not GL.ERROR[3]:
-                        GL.ERROR[3] = 1
-                        GL.lcd_update(9,1)
-                if b'+CME ERROR: 9' in module_reply:
+                        GL.lcd_update(9)
+
+            if b'+CME ERROR: 15' in module_reply:
+                if not GL.ERROR[3]:
+                    GL.ERROR[3] = 1
+                    GL.lcd_update(9)
+            if b'+CME ERROR: 9' in module_reply:
+                if GL.m:
+                    GL.m = 0
+                    GL.lcd_update(0)
+                
+                self.connect()
+            if b'+CME ERROR: 2' in module_reply:
+                GL.cme_error2 += 1
+                #self.handle_900a(0x1002)
+                GL.debug_print('GL.cme_error2 = {}'.format(GL.cme_error2))
+                if GL.cme_error2 > 2:
                     if GL.m:
                         GL.m = 0
                         GL.lcd_update(0)
-                    
-                    self.connect()
-                if b'+CME ERROR: 2' in module_reply:
-                    GL.cme_error2 += 1
-                    #self.handle_900a(0x1002)
-                    GL.debug_print('GL.cme_error2 = {}'.format(GL.cme_error2))
-                    if GL.cme_error2 > 2:
-                        if GL.m:
-                            GL.m = 0
-                            GL.lcd_update(0)
-                        GL.cme_error2 = 0
-                        self.send_at('AT+CIPCLOSE=0')
+                    GL.cme_error2 = 0
+                    self.send_at('AT+CIPCLOSE=0')
 
                 '''
                 if b'OK' in module_reply:
@@ -572,7 +573,10 @@ class MicropyGPRS(object):
                 try:
                     ind = dat.index(b',')
                     GL.rssi = int(self.gprs_segments[1][ind-2:ind])
-                    
+                    if GL.rssi == 99:
+                        if GL.m:
+                            GL.m = 0
+                            GL.lcd_update(0)
                 except ValueError:
                     return False
         except ValueError:
@@ -613,7 +617,7 @@ class MicropyGPRS(object):
                 #GL.rx_sms[phone_num[3:]] = self.gprs_segments[2].decode()
                 #GL.rx_sms.append(self.gprs_segments[2].decode())
                 self.unpack_sms(phone_num[3:],self.gprs_segments[2].decode())
-                self.del_sms()
+                
             #print('phone_num is {}'.format(phone_num))
             
 
@@ -693,10 +697,9 @@ class MicropyGPRS(object):
         if not new_char:
             if self.hw_port.any():
                 self._update(chr(self.hw_port.readchar()))
-                try:
-                    self.collect()
-                except:
-                    pass
+                
+                #GL.collect()
+                
                 if GL.rx_order_dat or GL.sms_storage_ip_id_port or GL.sms_storage_pwd or GL.sms_storage_phone or GL.sms_lock_power_on:
                     return 1
                 else:
@@ -704,10 +707,9 @@ class MicropyGPRS(object):
             return None
         else:
             self._update(new_char)
-            try:
-                self.collect()
-            except:
-                pass
+            
+            #GL.collect()
+            
             if GL.rx_order_dat:
                 return 1
             else:
@@ -819,11 +821,12 @@ class MicropyGPRS(object):
         except:
             if self.tmp_record == 0x1a and self.tx_buf == 0x1a:
                 return self.new_sentence('data',2)
-        #if self.char_count == 11 and self.gprs_segments[0][:11] == GL.id:
-        if len(self.tmp_record) >= 11 and self.tmp_record[-11:] == GL.id:
-            self.new_sentence('data')
-            return None
-
+        try:
+            if len(self.tmp_record) >= 11 and self.tmp_record[-11:] == GL.id:
+                self.new_sentence('data')
+                return None
+        except:
+            pass
         if self.sentence_data_active:
             #print('gprs_segments is {}'.format(self.gprs_segments[0]))
             #print('self.tx_buf is {}'.format(self.tx_buf))
@@ -883,16 +886,16 @@ class MicropyGPRS(object):
     # conmunication Protocol between control and server
     ########################################
     def method1xxx(self,order,*tupleArg):
-
         dat = b''.join([i.encode() if isinstance(i,str) else bytes(i) for i in tupleArg])
         #self.debug_print('dat before encrypt is {}'.format(dat))
         if self.pack_server_data(order,dat):
             return True
 
 
-    def handle_900a(self,order):
+    def handle_900a(self,order,ic_id=''):
         lss = bytes(GL.lock_status)
-        self.method1xxx(order,GL.id,lss,GL.gnss_buf,GL.ic_id)
+        
+        self.method1xxx(order,GL.id,lss,GL.gnss_buf,ic_id)
         if len(GL.gnss_buf) != 62:
             print('len(GL.gnss_buf) = {} and GL.gnss_buf = {}'.format(len(GL.gnss_buf),GL.gnss_buf))
         if self.send_dats(self.tx_buf,order):
@@ -901,7 +904,7 @@ class MicropyGPRS(object):
             return 0
 
     def send_1000(self):
-        return self.handle_900a(0x1000)
+        return self.handle_900a(0x1000,GL.ic_id)
     def send_1003(self):
         return self.handle_900a(0x1003)
     def send_1012(self):
@@ -920,48 +923,25 @@ class MicropyGPRS(object):
                 continue
             if GL.rx_order_dat['9000'][i] in [49,'1',b'1']:
                 my_lock.open_lock(i)
-                
             if GL.rx_order_dat['9000'][i] in [50,'2',b'2']:
                 my_lock.close_lock(i)
                 
             if GL.rx_order_dat['9000'][i] in [51,'3',b'3']:
-                try:
-                    GL.ERROR[0] = 1 # line 3 E1
-                except:
-                    print('occur E1 error -- ')
-
+                GL.ERROR[0] = 1 # line 3 E1
             if GL.rx_order_dat['9000'][i] in [52,'4',b'4']:
-                try:
-                    GL.ERROR[1] = 1 # line 3 E2
-                except:
-                    print('occur E2 error -- ')
+                GL.ERROR[1] = 1 # line 3 E2
             if GL.rx_order_dat['9000'][i] in [53,'5',b'5']:
-                try:
-                    GL.ERROR[2] = 1 # line 3 E3
-                except:
-                    print('occur E3 error -- ')
-                
+                GL.ERROR[2] = 1 # line 3 E3
             if 1 in GL.ERROR[:3]:
                 objSched.add_thread(alarm())
-            else:
-                GL.ERROR[:3] = [0]*3
-            GL.lcd_update(9) # line 3 E3
-        try:
-            self.collect()
-        except:
-            pass
+
+            GL.lcd_update(9) # line 3
         return self.handle_900a(0x1001)
     def handle_9002(self,objSched=0,my_lock=0,my_storage=0):
-
         return self.handle_900a(0x1002)
-
     def handle_9003(self,objSched=0,my_lock=0,my_storage=0):
-        
-        if self.send_1003():
+        return self.send_1003()
 
-            return 1
-        else:
-            return 0
     def handle_9004(self,objSched,my_lock,my_storage):
         step = 5
         if GL.rx_order_dat['9004'][0] == 48:
@@ -970,7 +950,6 @@ class MicropyGPRS(object):
             mode = 'add'
         else:
             print('write emergency data type is wrong')
-            
             return None
         if isinstance(GL.rx_order_dat['9004'],bytes):
             GL.rx_order_dat['9004'] = [GL.rx_order_dat['9004']]
@@ -981,26 +960,13 @@ class MicropyGPRS(object):
             
             GL.debug_print('gas_data = {}'.format(gas_data))
             if my_storage.modify_infos(my_storage.gifn,gas_data,mode):
-                self.method1xxx(0x1004,GL.id,str(num_of_gas),b''.join([i[:6] for i in gas_data[:num_of_gas]]))
+                info = GL.id+str(num_of_gas)+''.join([i[:6].decode() for i in gas_data[:num_of_gas]])
+                GL.debug_print('send 1004 dat is {}'.format(info))
+                self.method1xxx(0x1004,info)
                 self.send_dats(self.tx_buf,0x1004)
                 pyb.delay(100)
                 GL.dog.feed()
-                try:
-                    self.collect()
-                except:
-                    pass
-                '''
-                for s,info in my_storage._get_infos(my_storage.gifn,step):
-                    GL.debug_print('s = {}, and info = {}'.format(s,info))
-                    self.method1xxx(0x1004,GL.id,str(s),''.join([i[:6] for i in info[:s]]))
-                    self.send_dats(self.tx_buf,0x1004)
-                    pyb.delay(100)
-                    GL.dog.feed()
-                    try:
-                        self.collect()
-                    except:
-                        pass
-                '''
+                #GL.collect()
             else:
                 continue
         return 1
@@ -1012,16 +978,13 @@ class MicropyGPRS(object):
             self.method1xxx(0x1005,GL.id,'0')
             self.send_dats(self.tx_buf,0x1005)
         else:
-            for s,info in my_storage._get_infos(my_storage.gifn,step):
-                GL.debug_print('s = {}, and info = {}'.format(s,info))
-                self.method1xxx(0x1005,GL.id,str(s),''.join(info[:s]))
+            for infos in my_storage.get_infos(my_storage.gifn,step):
+                GL.debug_print('s = {}, and infos = {}'.format(len(infos),infos))
+                self.method1xxx(0x1005,GL.id,str(len(infos)),b''.join(infos))
                 self.send_dats(self.tx_buf,0x1005)
                 pyb.delay(100)
                 GL.dog.feed()
-        try:
-            self.collect()
-        except:
-            pass
+        #GL.collect()
         return 1
     def handle_9006(self,objSched,my_lock,my_storage):
         n = my_storage.get_rows(my_storage.gifn)
@@ -1029,10 +992,8 @@ class MicropyGPRS(object):
         my_storage.modify_info(my_storage.gifn,'')
         self.method1xxx(0x1006,GL.id,str(n))
         if self.send_dats(self.tx_buf,0x1006):
-            try:
-                self.collect()
-            except:
-                pass
+            #GL.collect()
+            
             return 1
         else:
             return 0
@@ -1046,14 +1007,13 @@ class MicropyGPRS(object):
         my_storage.modify_info(filename,GL.rx_order_dat['9007'],'add')
         n = my_storage.get_rows(filename)
         # emergency card only can write one each time
-        info = my_storage.get_info(filename,n-1)
+        info = my_storage.get_info(filename,n)
         print('info = {}'.format(info))
         self.method1xxx(0x1007,GL.id,info.decode())
         if self.send_dats(self.tx_buf,0x1007):
-            try:
-                self.collect()
-            except:
-                pass
+            
+            #GL.collect()
+            
             return 1
         else:
             return 0
@@ -1063,15 +1023,15 @@ class MicropyGPRS(object):
             my_storage.modify_info(my_storage.lsfn,'')
         elif GL.rx_order_dat['9008'] == b'2':
             my_lock.locks_power_off()
+
         else:
             return 0
         # my_lock.locks_power_status
         self.method1xxx(0x1008,GL.id,GL.rx_order_dat['9008'])
         self.send_dats(self.tx_buf,0x1008)
-        try:
-            self.collect()
-        except:
-            pass
+        
+        #GL.collect()
+        
         return 1
     def handle_9009(self,objSched,my_lock,my_storage):
         
@@ -1079,28 +1039,20 @@ class MicropyGPRS(object):
             pyb.delay(1000)
             pyb.hard_reset()
     def handle_9010(self,objSched,my_lock,my_storage):
-        
         GL.report_tick = int(GL.rx_order_dat['9010'].decode())
         self.method1xxx(0x1010,GL.id,'{:0>4}'.format(GL.report_tick))
         if self.send_dats(self.tx_buf,0x1010):
-            try:
-                self.collect()
-            except:
-                pass
+            #GL.collect()
             return 1
         else:
             return 0
     def handle_9011(self,objSched,my_lock,my_storage):
         GL.debug_print('9011 rx_dat {}'.format(GL.rx_order_dat['9011']))
     def handle_9012(self,objSched,my_lock,my_storage):
-        
         GL.send_9012 -= 1
         if GL.send_9012 < 0:
             GL.send_9012 = 0
-        try:
-            self.collect()
-        except:
-            pass
+        #GL.collect()
         return 1
     
     # All the currently supported at sentences

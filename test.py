@@ -2,7 +2,7 @@
 from storage import MicropySTORAGE
 from gu906 import MicropyGPRS
 from n303 import MicropyGNSS
-import pyb,GL,gc
+import pyb,GL
 from usched import Sched, Poller, wait,Timeout
 from wdt import wdog
 from beep import alarm
@@ -26,10 +26,18 @@ def stop(fTim, objSch):                                     # Stop the scheduler
     yield from wait(fTim)
     objSch.stop()
 
-
+def robin_9012_thread(my_gprs,timeout=60):
+    while True :
+        GL.debug_print('robin_9012_thread is runing {} ---9999999999999999'.format(timeout))
+        if not GL.m:
+            my_gprs.connect()
+        if GL.m:
+            GL.dog.feed()
+            my_gprs.send_1012()
+        #GL.collect()
+        GL.dog.feed()
+        yield from wait(timeout)
 def robin_tick_thread(objSched,my_lcd,my_lock,my_gprs,my_storage):
-
-    yield
     while True :
         print('robin_tick_thread is runing  111111111111111111')
         ####################################################
@@ -47,7 +55,6 @@ def robin_tick_thread(objSched,my_lcd,my_lock,my_gprs,my_storage):
             objSched.add_thread(alarm(4))
             if GL.m:
                 my_gprs.send_1003()
-                
             else:
                 my_storage.modify_info(my_storage.lsfn,1)
             GL.dog.feed()
@@ -65,31 +72,44 @@ def robin_tick_thread(objSched,my_lcd,my_lock,my_gprs,my_storage):
         my_gprs.rec_sms()
         GL.dog.feed()
         if GL.m:
+            my_gprs.send_1003()
+            GL.dog.feed()
             ##############################################
             # upload the offline data
             # upload the offline pos data
             n_pos = my_storage.get_rows(my_storage.posfn)
-            times = 0
-            while n_pos or 0 < times < 3:
-                my_storage.get_info(my_storage.posfn,n_pos)
-                my_gprs.send_dats(my_storage.get_info(my_storage.posfn,n_pos),0x1003)
-                my_storage.del_rows(my_storage.posfn,n_pos)
-                n_pos -= 1
-                times += 1
-            GL.dog.feed()
+            print('n_pos = {} and pos = {}'.format(n_pos,my_storage.get_info(my_storage.posfn,n_pos)))
+            step = 3
+            if n_pos:
+                for info3s in my_storage.get_infos(my_storage.posfn,step):
+                    for ind,info in enumerate(info3s):
+                        my_gprs.send_dats(info,0x1003)
+                        my_storage.del_rows(my_storage.posfn,ind)
+                    break
+                GL.dog.feed()
             # upload the offline sms opreate lock data
             n_sms = my_storage.get_rows(my_storage.smsfn)
-            times = 0
-            while n_sms or 0 < times < 3:
-                my_storage.get_info(my_storage.smsfn,n_sms)
-                my_gprs.send_dats(my_storage.get_info(my_storage.smsfn,n_sms),0x1000)
-                my_storage.del_rows(my_storage.smsfn,n_sms)
-                n_sms -= 1
-                times += 1
-            GL.dog.feed()
+            print('n_sms = {} and sr = {}'.format(n_sms,my_storage.get_info(my_storage.smsfn,n_sms)))
+            if n_sms:
+                for info3s in my_storage.get_infos(my_storage.smsfn,step):
+                    for info in info3s:
+                        my_gprs.send_dats(info,0x1003)
+                        my_storage.del_rows(my_storage.smsfn,ind)
+                    break
+                GL.dog.feed()
+            # upload the offline swipe_record data
+            n_sr = my_storage.get_rows(my_storage.srfn)
+            print('n_sr = {} and sr = {}'.format(n_sr,my_storage.get_info(my_storage.srfn,n_sr)))
+            step = 3
+            if n_sr:
+                for info3s in my_storage.get_infos(my_storage.srfn,step):
+                    for ind,info in enumerate(info3s):
+                        my_gprs.send_dats(info,0x1000)
+                        my_storage.del_rows(my_storage.srfn,ind)
+                    break
+                GL.dog.feed()
 
-            my_gprs.send_1003()
-            GL.dog.feed()
+            
 
         GL.debug_print('send_1003 every          {} seconds'.format(GL.report_tick))
         GL.debug_print('the GNSS signal is       {}'.format(GL.g))
@@ -99,7 +119,7 @@ def robin_tick_thread(objSched,my_lcd,my_lock,my_gprs,my_storage):
         GL.debug_print('GL.send_9012           = {}'.format(GL.send_9012))
         
         GL.dog.feed()
-        gc.collect()
+        #GL.collect()
         
         yield from wait(GL.report_tick)
 
@@ -110,7 +130,7 @@ def rfid_thread(objSched,my_lcd,my_lock,my_rfid,my_storage,my_gprs):
     wf = Poller(my_rfid.get_id, ())
     while(True):
         reason = (yield wf())
-        gc.collect()
+        #GL.collect()
         GL.dog.feed()
         if reason[1]:
             GL.debug_print('iiiiiiiiiiiiiiiiiiiiiiiiiii {}'.format(GL.ic_id))
@@ -119,7 +139,7 @@ def rfid_thread(objSched,my_lcd,my_lock,my_rfid,my_storage,my_gprs):
             GL.ERROR = [0]*5
             my_lcd.update(9) #  update line 3
             if GL.m:
-                my_gprs.handle_900a(0x1000)
+                my_gprs.handle_900a(0x1000,GL.ic_id)
             else:
                 tmp = my_storage.card_in_low()
                 ###############################
@@ -139,28 +159,15 @@ def rfid_thread(objSched,my_lcd,my_lock,my_rfid,my_storage,my_gprs):
                 else:
                     print('wrong return from cmy_storage.card_in_low() {}'.format(tmp))
                 ##  lss+gnss_buf+ic_id
-                info = bytearray(GL.lock_status)+GL.gnss_buf+GL.ic_id.encode()
-                info[12+53] = 50 #lss(12),gnss_buf 53th (b'1'--realtime,b'2'--no realtime)
+                info = bytearray(GL.id)+bytearray(GL.lock_status)+GL.gnss_buf+GL.ic_id.encode()
+                info[12+53+11] = 50 #lss(12),gnss_buf 53th (b'1'--realtime,b'2'--no realtime)
                 my_storage.modify_info(my_storage.srfn,info,'add')
                 GL.debug_print('offline swipe record add 1')
-                gc.collect()
+                #GL.collect()
                 GL.dog.feed()
 
 
-def robin_9012_thread(my_gprs,timeout=60):
-    yield
-    while True :
-        GL.debug_print('send_1012 every {} seconds'.format(timeout))
-        if not GL.m:
-            my_gprs.connect()
 
-        
-        if GL.m:
-            GL.dog.feed()
-            my_gprs.send_1012()
-        gc.collect()
-        GL.dog.feed()
-        yield from wait(timeout)
 
 def gprs_thread(objSched,my_gprs,my_lcd,my_lock,my_storage):
     wf0 = Timeout(0.5)
@@ -168,10 +175,10 @@ def gprs_thread(objSched,my_gprs,my_lcd,my_lock,my_storage):
     
     while True:
         reason = (yield wf())
-        gc.collect()
+        #GL.collect()
         GL.dog.feed()
         if reason[1]:
-            print('gprs thread is runing')
+            print('gprs thread is runing  nnnnnnnnnnnnnnnnnnnnnn')
             
             GL.debug_print('my_gprs.ats_dict = {}'.format(my_gprs.ats_dict))
             for order in my_gprs.ats_dict.keys():
@@ -179,7 +186,7 @@ def gprs_thread(objSched,my_gprs,my_lcd,my_lock,my_storage):
             if GL.sms_storage_ip_id_port:
                 GL.sms_storage_ip_id_port = False
                 my_storage.modify_info(my_storage.ipfn,GL.ip)
-                my_storage.modify_info(my_storage.portfn,GL.port)
+                my_storage.modify_info(my_storage.portfn,str(GL.port))
                 if len(GL.id) == 11:
                     my_storage.modify_info(my_storage.idfn,GL.id)
 
@@ -211,6 +218,7 @@ def gprs_thread(objSched,my_gprs,my_lcd,my_lock,my_storage):
                 my_storage.modify_info(my_storage.smsfn,sms_info,'add')
                 my_gprs.send_sms(num,'{} locks has finished'.format(order))
                 GL.dog.feed()
+            
             for order in GL.rx_order_dat.keys():
                 GL.debug_print('trigger order = {}'.format(order))
                 GL.dog.feed()
@@ -225,18 +233,28 @@ def gprs_thread(objSched,my_gprs,my_lcd,my_lock,my_storage):
 
 def gnss_thread(my_lock,my_gnss,my_storage):
     
-    wf = Poller(my_gnss.update, (my_storage,))
+    wf = Poller(my_gnss.update, ())
     while True:
         reason = (yield wf())
-        gc.collect()
+        #GL.collect()
         GL.dog.feed()
         #GL.debug_print(gnss_port.read())
         #GL.debug_print(GL.gnss_buf)
         if reason[1]:                                       # Value has changed
-            print('gnss thread is runing')
+            print('gnss thread is runing  gggggggggggggggggggggggggg')
             GL.debug_print(GL.gnss_buf)
             GL.dog.feed()
-            
+            try:
+                if not GL.m:
+                    pos = bytearray(GL.id)+bytearray(GL.lock_status)+GL.gnss_buf
+                    pos[53+12+11] = 50
+                    n = my_storage.get_rows(my_storage.posfn)
+                    # int(bytes(GL.gnss_buf[42:45]).decode()) ---speed
+                    if int(bytes(GL.gnss_buf[42:45]).decode()) > 1:
+                        my_storage.modify_info(my_storage.posfn,pos,'add')
+                        print('save {}th offline pos record'.format(n+1))
+            except:
+                print('storage offline pos record failed')
             
             if GL.vcc_below_14V:
                 GL.vcc_below_14V = False
@@ -257,8 +275,8 @@ def main():
     dog = wdog()
     GL.dog = dog
 
-    gc.enable()
-    
+    #gc.enable()
+    #GL.collect = gc.collect()
     GL.init = True
     objSched = Sched()
 
@@ -281,7 +299,7 @@ def main():
     my_lock = MicropyLOCK()
     
     my_storage = MicropySTORAGE()
-    my_gprs = MicropyGPRS(gc.collect)
+    my_gprs = MicropyGPRS()
     my_gnss = MicropyGNSS()
     my_rfid = MicropyRFID()
     
@@ -290,10 +308,13 @@ def main():
 
     
     
-    if int(my_storage.get_info(my_storage.usfn),10) == 0:
+    if not my_storage.get_info(my_storage.usfn):
         my_storage.prepare()
         my_gprs.wait_set_sms(objSched)
-    my_storage.modify_info(my_storage.usfn,int(my_storage.get_info(my_storage.usfn),10)+1)
+    try:
+        my_storage.modify_info(my_storage.usfn,int(my_storage.get_info(my_storage.usfn),10)+1)
+    except:
+        my_storage.modify_info(my_storage.usfn,1)
 
     my_gprs.connect()
     

@@ -101,8 +101,10 @@ class MicropyLOCK(object):
             i.value(not mode)
         return 1
     def locks_power_on(self):
+        GL.lock_status = [1]*GL.N_lock
         return self.locks_power_opreate(1)
     def locks_power_off(self):
+        GL.lock_status = [0]*GL.N_lock
         return self.locks_power_opreate(0)
     def locks_power_status(self):
         out = bytearray()
