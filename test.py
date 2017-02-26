@@ -183,6 +183,9 @@ def gprs_thread(objSched,my_gprs,my_lcd,my_lock,my_storage):
             GL.debug_print('my_gprs.ats_dict = {}'.format(my_gprs.ats_dict))
             for order in my_gprs.ats_dict.keys():
                 del my_gprs.ats_dict[order]
+            if GL.SMS:
+                GL.SMS = False
+                my_gprs.del_sms()
             if GL.sms_storage_ip_id_port:
                 GL.sms_storage_ip_id_port = False
                 my_storage.modify_info(my_storage.ipfn,GL.ip)

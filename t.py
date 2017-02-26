@@ -23,10 +23,12 @@ b'00007655555555666666669934.746382113.6814610100111111111111',
 b'00007533333333444444449934.742107113.7538930100111111111111'
 ]
 #my_gprs.unpack_server_data(a)
+
 filename = 'gas_info.txt'
+my_storage.modify_info(filename,'')
 for i in b:
-    my_storage.modify_infos(filename,[i],'add')
+    my_storage.modify_infos(filename,[i])
 
 print('n_gas_info = {}'.format(my_storage.get_rows(filename)))
-for i in my_storage._get_infos(filename):
+for i in my_storage.get_infos(filename):
     print(i)

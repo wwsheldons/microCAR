@@ -97,7 +97,7 @@ class MicropyGPRS(object):
         GL.ERROR[4]  --- # reserve
         '''
         GL.ERROR = [0]*5
-        
+        GL.SMS = False
         #####################
         # Object Status Flags
         self.sentence_server_active = False
@@ -148,7 +148,7 @@ class MicropyGPRS(object):
     ########################################
     # opreate the gprs module
     ########################################
-    def send_at(self,order,timeout = 3000):
+    def send_at(self,order,timeout = 1000):
         # GL.debug_print('send order is {}'.format(order))
         if self.hw_port.write('{}\r\n'.format(order)) == len(order)+2:
             self.ats_dict[order] = 0
@@ -163,7 +163,7 @@ class MicropyGPRS(object):
                     
                     return 1
         return 0
-    def send_d(self,d,timeout = 5000):
+    def send_d(self,d,timeout = 1000):
         
         if not isinstance(d,bytearray):
             self.hw_port.write(bytearray(d))
@@ -197,7 +197,7 @@ class MicropyGPRS(object):
         '''
         order = 'AT+CIPSEND={},1'.format(len(d))
         self.send_at(order)
-        pyb.delay(20)
+        pyb.delay(50)
         # GL.debug_print('the dat will be send is{}'.format(d))
         self.send_d(d)
         #send_at('AT+CIPSEND={}'.format(len(d)))#bin type
@@ -261,7 +261,8 @@ class MicropyGPRS(object):
     # data from server Parsers
     ########################################
     def unpack_sms(self,num,context,opt = 0x01):
-        # self.debug_print('num is {} and context is {}'.format(num,context))
+        GL.debug_print('num is {} and context is {}'.format(num,context))
+        GL.SMS = True
         if 'password' in context:
             ind_password = context.index('password:')
             GL.pwd = context[ind_password+9:ind_password+14]
@@ -271,22 +272,31 @@ class MicropyGPRS(object):
             GL.sms_storage_ip_id_port = True
             ind_ip = context.index('ip:')
             ind_ip_end = context[ind_ip+1:].index('#')
-            GL.ip = context[ind_ip+3:ind_ip_end+ind_ip+1]
-            #storage_gprs['m_ip'](ip)
-            #GL.storage.modify_info(GL.storage.ipfn,GL.ip)
-            ind_port = context.index('port:')
-            GL.port = int(context[ind_port+5:ind_port+9],10)
             
-            #GL.storage.modify_info(GL.storage.portfn,str(GL.port))
-
-            #storage_gprs['m_port'](port)
+            ind_port = context.index('port:')
             ind_id = context.index('id:')
-            GL.id = context[ind_id+3:ind_id+14]
+
+            tmp_ip = context[ind_ip+3:ind_ip_end+ind_ip+1]
+            tmp_id = context[ind_id+3:ind_id+14]
+            tmp_port = int(context[ind_port+5:ind_port+9],10)
+            try:
+                if GL.ip != tmp_ip or tmp_port != GL.port or GL.id != tmp_id:
+                    GL.ip = tmp_ip
+                    GL.port = tmp_port
+                    GL.id = tmp_id
+                    self.send_sms(num,'ip port and id set OK')
+            except:
+                GL.ip = tmp_ip
+                GL.port = tmp_port
+                GL.id = tmp_id
+                self.send_sms(num,'ip port and id set OK')
+            finally:
+                GL.debug_print('GL.ip = {} GL.id = {} GL.port = {}'.format(GL.ip,GL.id,GL.port))
+                self.recv_set_sms = 1
+            #GL.storage.modify_info(GL.storage.ipfn,GL.ip)
+            #GL.storage.modify_info(GL.storage.portfn,str(GL.port))
             #GL.storage.modify_info(GL.storage.idfn,GL.id)
-            #storage_gprs['m_id'](id)
-            self.send_sms(num,'ip port and id set OK')
-            #storage_gprs['m_using_times']()
-            self.recv_set_sms = 1
+                
             
         if 'admin phone' in context:
             ind = context.index(':')
@@ -611,9 +621,13 @@ class MicropyGPRS(object):
             if phone_num == '10086':
                 self.del_sms()
                 return False
-            GL.debug_print('phone_num is {} and sms is {}'.format(phone_num[3:],self.gprs_segments[2].decode()))
+            #GL.debug_print('phone_num is {} and sms is {}'.format(phone_num[3:],self.gprs_segments[2].decode()))
             self.phone_num = phone_num[3:]
-            if phone_num[3:] in [self.admin_phone]+GL.set_phone:
+            try:
+                ph = [self.admin_phone]+GL.set_phone
+            except:
+                ph = [self.admin_phone]
+            if phone_num[3:] in ph:
                 #GL.rx_sms[phone_num[3:]] = self.gprs_segments[2].decode()
                 #GL.rx_sms.append(self.gprs_segments[2].decode())
                 self.unpack_sms(phone_num[3:],self.gprs_segments[2].decode())
@@ -700,7 +714,7 @@ class MicropyGPRS(object):
                 
                 #GL.collect()
                 
-                if GL.rx_order_dat or GL.sms_storage_ip_id_port or GL.sms_storage_pwd or GL.sms_storage_phone or GL.sms_lock_power_on:
+                if GL.rx_order_dat or GL.SMS:
                     return 1
                 else:
                     return 0
@@ -1008,12 +1022,10 @@ class MicropyGPRS(object):
         n = my_storage.get_rows(filename)
         # emergency card only can write one each time
         info = my_storage.get_info(filename,n)
-        print('info = {}'.format(info))
-        self.method1xxx(0x1007,GL.id,info.decode())
+        print('{}th info = {}'.format(n,info))
+        self.method1xxx(0x1007,GL.id,info)
         if self.send_dats(self.tx_buf,0x1007):
-            
             #GL.collect()
-            
             return 1
         else:
             return 0
@@ -1023,7 +1035,6 @@ class MicropyGPRS(object):
             my_storage.modify_info(my_storage.lsfn,'')
         elif GL.rx_order_dat['9008'] == b'2':
             my_lock.locks_power_off()
-
         else:
             return 0
         # my_lock.locks_power_status
